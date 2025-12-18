@@ -371,7 +371,7 @@ with col_left:
         current_savings = st.number_input("Current Savings", value=st.session_state.loaded_savings, step=1000.0, key="current_savings")
         c1, c2 = st.columns(2)
         basic_salary = c1.number_input("Basic Salary", value=st.session_state.loaded_salary, key="basic_salary")
-        allowances = c1.number_input("Allowances", value=st.session_state.loaded_allowances, key="allowances")
+        allowances = c1.number_input("Basic Allowances", value=st.session_state.loaded_allowances, key="allowances")
         variable_income = c2.number_input("Side Income", value=st.session_state.loaded_var, key="variable_income")
 
     with st.container(border=True):
@@ -526,7 +526,7 @@ with col_right:
             
             c_load, c_del = st.columns(2)
             
-            # 1. LOAD RECORD (JUMP BACK)
+            # 1. LOAD RECORD (JUMP BACK) - FIXED WITH RESET STRATEGY
             with c_load:
                 st.caption("📂 Load / Jump to Record")
                 record_to_load = st.selectbox("Select Record", df_hist['Label'].unique(), index=None, placeholder="Choose past month...", key="loader_box")
@@ -534,28 +534,31 @@ with col_right:
                     if record_to_load:
                         with st.spinner("Loading..."):
                             row = df_hist[df_hist['Label'] == record_to_load].iloc[0]
-                            # Update Session Keys
-                            st.session_state["month_select"] = row['Month']
-                            st.session_state["year_input"] = int(row['Year'])
                             
-                            st.session_state["basic_salary"] = float(row.get('Basic_Salary', 0))
-                            st.session_state["allowances"] = float(row.get('Allowances', 0))
-                            st.session_state["variable_income"] = float(row.get('Variable_Income', 0))
-                            st.session_state["current_savings"] = float(row.get('Current_Savings', 0))
-                            st.session_state["epf_rate"] = int(row.get('EPF_Rate', 11))
+                            # A. Update Helper Variables (The Source of Truth)
+                            st.session_state.loaded_month = row['Month']
+                            st.session_state.loaded_year = int(row['Year'])
+                            st.session_state.loaded_salary = float(row.get('Basic_Salary', 0))
+                            st.session_state.loaded_allowances = float(row.get('Allowances', 0))
+                            st.session_state.loaded_var = float(row.get('Variable_Income', 0))
+                            st.session_state.loaded_savings = float(row.get('Current_Savings', 0))
+                            st.session_state.loaded_epf = int(row.get('EPF_Rate', 11))
+                            
+                            # B. Update Lists directly (Lists are safe to set)
                             st.session_state.expenses = json.loads(row.get('Expenses_JSON', '[]'))
                             st.session_state.deductions_list = json.loads(row.get('Deductions_JSON', '[]'))
                             
-                            # Sync Helpers
-                            st.session_state.loaded_salary = st.session_state["basic_salary"]
-                            st.session_state.loaded_allowances = st.session_state["allowances"]
-                            st.session_state.loaded_var = st.session_state["variable_income"]
-                            st.session_state.loaded_savings = st.session_state["current_savings"]
-                            st.session_state.loaded_epf = st.session_state["epf_rate"]
-                            st.session_state.loaded_month = row['Month']
-                            st.session_state.loaded_year = int(row['Year'])
+                            # C. Prevent Watcher Loop
                             st.session_state.last_viewed_month = row['Month']
                             st.session_state.last_viewed_year = int(row['Year'])
+                            
+                            # D. THE FIX: DELETE WIDGET KEYS to force them to reload from helpers
+                            keys_to_reset = ["month_select", "year_input", "basic_salary", "allowances", 
+                                             "variable_income", "current_savings", "epf_rate", 
+                                             "expenses_editor", "deductions_editor"]
+                            for k in keys_to_reset:
+                                if k in st.session_state:
+                                    del st.session_state[k]
                             
                             st.rerun()
 
