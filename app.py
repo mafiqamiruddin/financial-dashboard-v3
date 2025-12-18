@@ -232,6 +232,36 @@ with col_right:
             if os.path.exists("financial_history.csv"):
                 with open("financial_history.csv", "rb") as f:
                     st.download_button("Download CSV", f, "financial_history.csv", "text/csv")
+                    # ... (after the download button code) ...
+        
+        st.divider()
+        st.subheader("📊 Historical Trends")
+        
+        if os.path.exists("financial_history.csv"):
+            history_df = pd.read_csv("financial_history.csv")
+            if not history_df.empty:
+                # Ensure date is sorted
+                history_df['Date'] = pd.to_datetime(history_df['Date'])
+                history_df = history_df.sort_values('Date')
+                
+                # Plot the trend
+                fig_history = px.line(
+                    history_df, 
+                    x='Month', # or 'Date' if you prefer precise dates
+                    y=['Net_Income', 'Balance', 'Total_Expenses'], 
+                    markers=True,
+                    title="My Financial Evolution",
+                    color_discrete_map={
+                        "Net_Income": "#2ecc71", 
+                        "Total_Expenses": "#e74c3c", 
+                        "Balance": "#3498db"
+                    }
+                )
+                st.plotly_chart(fig_history, use_container_width=True)
+            else:
+                st.info("No history data found yet.")
+        else:
+            st.info("Save your first month to see the trend line!")
 
     # AI AUDITOR
     st.markdown("###")
