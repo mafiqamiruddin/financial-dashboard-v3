@@ -46,7 +46,7 @@ def get_default_state():
         ]
     }
 
-# --- GOOGLE SHEETS FUNCTIONS ---
+# --- GOOGLE SHEETS FUNCTIONS (ROBUST VERSION) ---
 def get_google_sheet_client():
     try:
         if "GCP_CREDENTIALS" in st.secrets:
@@ -67,16 +67,20 @@ def get_sheet_data(worksheet_name):
             try:
                 ws = sheet.worksheet(worksheet_name)
                 data = ws.get_all_records()
-                return pd.DataFrame(data)
+                df = pd.DataFrame(data)
+                # Check if dataframe is empty but we expect columns
+                if df.empty: 
+                    return pd.DataFrame()
+                return df
             except gspread.exceptions.WorksheetNotFound:
                 return pd.DataFrame()
         except Exception as e:
-            st.error(f"Sheet Load Error: {e}")
+            # Often caused by header mismatches in gspread
             return pd.DataFrame()
     return pd.DataFrame()
 
 def save_row_to_history(row_data_dict):
-    """Saves a row to History. Now includes FULL state JSONs."""
+    """Saves a row to History with strict Header Enforcement."""
     client = get_google_sheet_client()
     if client:
         sheet = client.open_by_url(st.secrets["SHEET_URL"])
@@ -85,24 +89,41 @@ def save_row_to_history(row_data_dict):
         except:
             ws = sheet.add_worksheet(title="History", rows=100, cols=20)
             
-        # Check if header exists, if not create it (including new JSON columns)
-        existing_data = ws.get_all_values()
-        if not existing_data:
-            ws.append_row(list(row_data_dict.keys()))
+        # 1. ENFORCE HEADER ROW
+        # Get the keys (column names) from your data
+        expected_headers = list(row_data_dict.keys())
         
-        # --- ROBUST SAVE: Check for existing Month/Year and Update ---
-        records = ws.get_all_records()
-        df = pd.DataFrame(records)
+        # Check what is currently in the first row of Google Sheets
+        current_headers = ws.row_values(1)
         
-        # If sheet is not empty and has columns
-        if not df.empty and 'Month' in df.columns and 'Year' in df.columns:
-            # Create a mask for matching row
-            mask = (df['Month'] == row_data_dict['Month']) & (df['Year'] == row_data_dict['Year'])
+        # If headers are missing or different, Force Update them
+        if not current_headers or current_headers != expected_headers:
+            ws.clear() # Wipe sheet to ensure clean slate
+            ws.append_row(expected_headers)
+        
+        # 2. HANDLE DUPLICATES (Update existing record)
+        # We read all data to find if this Month/Year already exists
+        all_values = ws.get_all_values()
+        
+        # If there is data (more than just header)
+        if len(all_values) > 1:
+            # Convert to DF for easy searching
+            # all_values[0] is header, all_values[1:] is data
+            df = pd.DataFrame(all_values[1:], columns=all_values[0])
+            
+            # Find index of matching row
+            # We convert columns to string to ensure matching works
+            mask = (df['Month'].astype(str) == str(row_data_dict['Month'])) & \
+                   (df['Year'].astype(str) == str(row_data_dict['Year']))
+            
             if mask.any():
-                # Get the row index (1-based, +1 for header)
-                row_idx = df.index[mask][0] + 2 
-                ws.delete_rows(int(row_idx))
-                
+                # Get the Excel Row Number (Index + 2 because: +1 for header, +1 for 0-based index)
+                # We iterate backwards to delete duplicates safely if multiple exist
+                indices_to_delete = df.index[mask].tolist()
+                for idx in sorted(indices_to_delete, reverse=True):
+                    ws.delete_rows(int(idx) + 2)
+                    
+        # 3. APPEND NEW DATA
         ws.append_row(list(row_data_dict.values()))
 
 def delete_rows_from_sheet(worksheet_name, month_year_list):
@@ -113,12 +134,13 @@ def delete_rows_from_sheet(worksheet_name, month_year_list):
         data = ws.get_all_records()
         df = pd.DataFrame(data)
         
-        df['Label'] = df['Month'] + " " + df['Year'].astype(str)
-        df_clean = df[~df['Label'].isin(month_year_list)]
-        df_clean = df_clean.drop(columns=['Label'])
-        
-        ws.clear()
-        if not df_clean.empty:
+        if not df.empty:
+            df['Label'] = df['Month'] + " " + df['Year'].astype(str)
+            df_clean = df[~df['Label'].isin(month_year_list)]
+            df_clean = df_clean.drop(columns=['Label'])
+            
+            ws.clear()
+            # Re-write headers and data
             ws.update([df_clean.columns.values.tolist()] + df_clean.values.tolist())
 
 # --- CLOUD SYNC FUNCTIONS ---
@@ -594,3 +616,4 @@ with col_right:
                         response = client.models.generate_content(model=selected_auditor_model, contents=prompt)
                         st.markdown(f"""<div style="background-color: #1e293b; padding: 20px; border-radius: 10px; color: #e2e8f0; border-left: 5px solid #8b5cf6;">{response.text}</div>""", unsafe_allow_html=True)
                 except Exception as e: st.error(f"Error: {e}")
+
