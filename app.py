@@ -20,11 +20,12 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- STATE MANAGEMENT SYSTEM (The Fix) ---
+# --- STATE MANAGEMENT SYSTEM (FIXED) ---
 STATE_FILE = "app_state.json"
 
 def save_state_to_file():
     """Saves the current session state to a local JSON file."""
+    # We pull directly from the widget keys
     state_data = {
         "expenses": st.session_state.get('expenses', []),
         "deductions_list": st.session_state.get('deductions_list', []),
@@ -33,8 +34,8 @@ def save_state_to_file():
         "variable_income": st.session_state.get('variable_income', 0.0),
         "current_savings": st.session_state.get('current_savings', 10000.0),
         "epf_rate": st.session_state.get('epf_rate', 11),
-        "month_index": st.session_state.get('month_index', datetime.now().month - 1),
-        "year": st.session_state.get('year', datetime.now().year),
+        "month_select": st.session_state.get('month_select', "December"),
+        "year_input": st.session_state.get('year_input', datetime.now().year),
     }
     try:
         with open(STATE_FILE, "w") as f:
@@ -53,16 +54,17 @@ def load_state_from_file():
     return None
 
 # --- INITIALIZATION ---
-# Load previous state if it exists, otherwise use defaults
+# Load previous state if it exists
 saved_state = load_state_from_file()
 
+# 1. Restore Tables (Expenses & Deductions)
 if saved_state:
-    # RESTORE MEMORY
-    if 'expenses' not in st.session_state: st.session_state.expenses = saved_state.get('expenses')
-    if 'deductions_list' not in st.session_state: st.session_state.deductions_list = saved_state.get('deductions_list')
-    # We will initialize widget values directly in the widgets below using these keys
+    if 'expenses' not in st.session_state: 
+        st.session_state.expenses = saved_state.get('expenses')
+    if 'deductions_list' not in st.session_state: 
+        st.session_state.deductions_list = saved_state.get('deductions_list')
 else:
-    # DEFAULT MEMORY (First time run)
+    # Defaults for first-time run
     if 'expenses' not in st.session_state:
         st.session_state.expenses = [
             {"Category": "Housing (Rent/Loan)", "Amount": 1500.0},
@@ -120,21 +122,30 @@ with col_left:
     with st.container(border=True):
         st.subheader("📅 Period & Income")
         
-        # DATE INPUTS (Restored from Memory)
+        # DATE INPUTS
         d_col1, d_col2 = st.columns(2)
         months = ["January", "February", "March", "April", "May", "June", 
                   "July", "August", "September", "October", "November", "December"]
         
-        # Get default from saved state or current date
-        def_month_idx = saved_state.get('month_index', datetime.now().month - 1) if saved_state else datetime.now().month - 1
-        def_year = saved_state.get('year', datetime.now().year) if saved_state else datetime.now().year
+        # Determine defaults
+        if saved_state and 'month_select' in saved_state:
+            try:
+                def_month_idx = months.index(saved_state['month_select'])
+            except:
+                def_month_idx = datetime.now().month - 1
+        else:
+            def_month_idx = datetime.now().month - 1
 
+        def_year = saved_state.get('year_input', datetime.now().year) if saved_state else datetime.now().year
+
+        # KEY arguments allow automatic state binding
         selected_month = d_col1.selectbox("Month", months, index=def_month_idx, key="month_select")
         selected_year = d_col2.number_input("Year", min_value=2020, max_value=2030, value=def_year, key="year_input")
 
         st.divider()
         
-        # INCOME INPUTS (Restored from Memory)
+        # INCOME INPUTS
+        # We load defaults from file, but rely on 'key=' to handle updates
         def_savings = saved_state.get('current_savings', 10000.0) if saved_state else 10000.0
         def_salary = saved_state.get('basic_salary', 6000.0) if saved_state else 6000.0
         def_allowance = saved_state.get('allowances', 500.0) if saved_state else 500.0
@@ -157,7 +168,6 @@ with col_left:
         st.divider()
         st.caption("Other Deductions (Editable)")
         
-        # DEDUCTIONS TABLE
         df_deductions_input = pd.DataFrame(st.session_state.deductions_list)
         edited_deductions = st.data_editor(
             df_deductions_input,
@@ -169,7 +179,7 @@ with col_left:
                 "Amount": st.column_config.NumberColumn("Amount (RM)", format="%.2f")
             }
         )
-        # Update State immediately
+        # Immediate Update
         st.session_state.deductions_list = edited_deductions.to_dict('records')
         
         other_deductions_total = edited_deductions['Amount'].sum() if not edited_deductions.empty else 0
@@ -179,7 +189,6 @@ with col_left:
     with st.container(border=True):
         st.subheader("🧾 Living Expenses")
         
-        # EXPENSES TABLE
         df_expenses_input = pd.DataFrame(st.session_state.expenses)
         edited_expenses = st.data_editor(
             df_expenses_input,
@@ -258,7 +267,7 @@ with col_right:
                 with open("financial_history.csv", "rb") as f:
                     st.download_button("Download CSV", f, "financial_history.csv", "text/csv")
         
-        # HISTORICAL TREND CHART (Restored)
+        # HISTORICAL TREND CHART
         st.divider()
         if os.path.exists("financial_history.csv"):
             history_df = pd.read_csv("financial_history.csv")
@@ -296,15 +305,7 @@ with col_right:
                 except Exception as e:
                     st.error(f"Error: {e}")
 
-# --- AUTO-SAVE TRIGGER ---
-# We update the internal state dictionary with current widget values before saving
-st.session_state.month_index = months.index(selected_month)
-st.session_state.year = selected_year
-st.session_state.basic_salary = basic_salary
-st.session_state.allowances = allowances
-st.session_state.variable_income = variable_income
-st.session_state.current_savings = current_savings
-st.session_state.epf_rate = epf_rate
-
-# Trigger Save
+# --- AUTO-SAVE TRIGGER (SAFE) ---
+# We simply call save. We DO NOT manually assign session_state variables here.
+# The widgets (like st.number_input) have ALREADY updated session_state by this point.
 save_state_to_file()
