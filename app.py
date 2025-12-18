@@ -206,6 +206,28 @@ with st.sidebar:
 
                     st.rerun() # Refresh page to show new data
             st.success("Draft Updated!")
+
+    st.divider()
+    if st.button("🛠️ Check Available Models"):
+        if not api_key: st.error("API Key required.")
+        else:
+            try:
+                client = genai.Client(api_key=api_key)
+                models = client.models.list()
+                fetched = [m.name.replace("models/", "") for m in models if "gemini" in m.name and "embedding" not in m.name]
+                if fetched: st.session_state.available_models = sorted(fetched); st.success(f"Found {len(fetched)} models!")
+            except Exception as e: st.error(f"Error: {e}")
+    st.divider()
+    if st.button("🛠️ Check Available Models"):
+        if not api_key: st.error("API Key required.")
+        else:
+            try:
+                client = genai.Client(api_key=api_key)
+                models = client.models.list()
+                fetched = [m.name.replace("models/", "") for m in models if "gemini" in m.name and "embedding" not in m.name]
+                if fetched: st.session_state.available_models = sorted(fetched); st.success(f"Found {len(fetched)} models!")
+            except Exception as e: st.error(f"Error: {e}")
+
 # --- NEW: AI AUTO-FILL SECTION ---
     st.divider()
     with st.expander("🤖 AI Auto-Fill (Magic)"):
@@ -220,6 +242,8 @@ with st.sidebar:
                     try:
                         client = genai.Client(api_key=api_key)
                         
+                        # 1. The Strict Prompt
+                        # We force the AI to return ONLY JSON matching your exact variable names.
                         prompt_structure = """
                         You are a Data Entry API. 
                         Based on this persona: "{persona}"
@@ -249,15 +273,18 @@ with st.sidebar:
                         """
                         final_prompt = prompt_structure.format(persona=user_persona if user_persona else "Average Malaysian Executive")
                         
+                        # 2. Call AI
                         response = client.models.generate_content(
-                            model="gemini-2.0-flash-exp", 
+                            model="gemini-2.0-flash-exp", # Use a fast model
                             contents=final_prompt
                         )
                         
+                        # 3. Clean and Parse JSON
+                        # Sometimes AI adds ```json ... ``` wrappers, we need to clean them.
                         raw_text = response.text.replace("```json", "").replace("```", "").strip()
                         ai_data = json.loads(raw_text)
                         
-                        # Inject into Session State
+                        # 4. Inject into Session State (The "Sticky Key" Fix)
                         st.session_state["basic_salary"] = float(ai_data.get("basic_salary", 0))
                         st.session_state["allowances"] = float(ai_data.get("allowances", 0))
                         st.session_state["variable_income"] = float(ai_data.get("variable_income", 0))
@@ -267,6 +294,7 @@ with st.sidebar:
                         st.session_state.expenses = ai_data.get("expenses", [])
                         st.session_state.deductions_list = ai_data.get("deductions", [])
                         
+                        # Update helpers to prevent reversion
                         st.session_state.loaded_salary = st.session_state["basic_salary"]
                         st.session_state.loaded_allowances = st.session_state["allowances"]
                         st.session_state.loaded_var = st.session_state["variable_income"]
@@ -278,27 +306,6 @@ with st.sidebar:
                         
                     except Exception as e:
                         st.error(f"AI Generation Failed: {e}")
-
-    st.divider()
-    if st.button("🛠️ Check Available Models"):
-        if not api_key: st.error("API Key required.")
-        else:
-            try:
-                client = genai.Client(api_key=api_key)
-                models = client.models.list()
-                fetched = [m.name.replace("models/", "") for m in models if "gemini" in m.name and "embedding" not in m.name]
-                if fetched: st.session_state.available_models = sorted(fetched); st.success(f"Found {len(fetched)} models!")
-            except Exception as e: st.error(f"Error: {e}")
-    st.divider()
-    if st.button("🛠️ Check Available Models"):
-        if not api_key: st.error("API Key required.")
-        else:
-            try:
-                client = genai.Client(api_key=api_key)
-                models = client.models.list()
-                fetched = [m.name.replace("models/", "") for m in models if "gemini" in m.name and "embedding" not in m.name]
-                if fetched: st.session_state.available_models = sorted(fetched); st.success(f"Found {len(fetched)} models!")
-            except Exception as e: st.error(f"Error: {e}")
 
 # --- MAIN LAYOUT ---
 col_left, col_right = st.columns([1, 1.5], gap="large")
@@ -504,6 +511,7 @@ with col_right:
                         response = client.models.generate_content(model=selected_model, contents=prompt)
                         st.markdown(f"""<div style="background-color: #1e293b; padding: 20px; border-radius: 10px; color: #e2e8f0; border-left: 5px solid #8b5cf6;">{response.text}</div>""", unsafe_allow_html=True)
                 except Exception as e: st.error(f"Error: {e}")
+
 
 
 
