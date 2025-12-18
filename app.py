@@ -3,6 +3,7 @@ import pandas as pd
 from google import genai
 import plotly.express as px
 import os
+import json
 from datetime import datetime
 
 # --- PAGE CONFIGURATION ---
@@ -19,35 +20,71 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- SESSION STATE INITIALIZATION ---
+# --- STATE MANAGEMENT SYSTEM (The Fix) ---
+STATE_FILE = "app_state.json"
 
-# 1. Expenses State
-if 'expenses' not in st.session_state:
-    st.session_state.expenses = [
-        {"Category": "Housing (Rent/Loan)", "Amount": 1500.0},
-        {"Category": "Car Loan/Transport", "Amount": 800.0},
-        {"Category": "Food & Groceries", "Amount": 1000.0},
-        {"Category": "Utilities & Telco", "Amount": 300.0},
-        {"Category": "PTPTN / Education Loan", "Amount": 200.0},
-        {"Category": "Savings / Investments", "Amount": 500.0},
-    ]
+def save_state_to_file():
+    """Saves the current session state to a local JSON file."""
+    state_data = {
+        "expenses": st.session_state.get('expenses', []),
+        "deductions_list": st.session_state.get('deductions_list', []),
+        "basic_salary": st.session_state.get('basic_salary', 6000.0),
+        "allowances": st.session_state.get('allowances', 500.0),
+        "variable_income": st.session_state.get('variable_income', 0.0),
+        "current_savings": st.session_state.get('current_savings', 10000.0),
+        "epf_rate": st.session_state.get('epf_rate', 11),
+        "month_index": st.session_state.get('month_index', datetime.now().month - 1),
+        "year": st.session_state.get('year', datetime.now().year),
+    }
+    try:
+        with open(STATE_FILE, "w") as f:
+            json.dump(state_data, f)
+    except Exception as e:
+        print(f"Auto-save failed: {e}")
 
-# 2. Statutory Deductions State
-if 'deductions_list' not in st.session_state:
-    st.session_state.deductions_list = [
-        {"Category": "SOCSO / PERKESO", "Amount": 19.75},
-        {"Category": "EIS / SIP", "Amount": 7.90},
-        {"Category": "PCB (Monthly Tax)", "Amount": 300.00},
-    ]
+def load_state_from_file():
+    """Loads the last saved state from the local JSON file."""
+    if os.path.exists(STATE_FILE):
+        try:
+            with open(STATE_FILE, "r") as f:
+                return json.load(f)
+        except:
+            return None
+    return None
 
-# 3. Model State
+# --- INITIALIZATION ---
+# Load previous state if it exists, otherwise use defaults
+saved_state = load_state_from_file()
+
+if saved_state:
+    # RESTORE MEMORY
+    if 'expenses' not in st.session_state: st.session_state.expenses = saved_state.get('expenses')
+    if 'deductions_list' not in st.session_state: st.session_state.deductions_list = saved_state.get('deductions_list')
+    # We will initialize widget values directly in the widgets below using these keys
+else:
+    # DEFAULT MEMORY (First time run)
+    if 'expenses' not in st.session_state:
+        st.session_state.expenses = [
+            {"Category": "Housing (Rent/Loan)", "Amount": 1500.0},
+            {"Category": "Car Loan/Transport", "Amount": 800.0},
+            {"Category": "Food & Groceries", "Amount": 1000.0},
+            {"Category": "Utilities & Telco", "Amount": 300.0},
+            {"Category": "PTPTN / Education Loan", "Amount": 200.0},
+            {"Category": "Savings / Investments", "Amount": 500.0},
+        ]
+    if 'deductions_list' not in st.session_state:
+        st.session_state.deductions_list = [
+            {"Category": "SOCSO / PERKESO", "Amount": 19.75},
+            {"Category": "EIS / SIP", "Amount": 7.90},
+            {"Category": "PCB (Monthly Tax)", "Amount": 300.00},
+        ]
+
 if 'available_models' not in st.session_state:
     st.session_state.available_models = ["gemini-1.5-flash", "gemini-2.0-flash-exp"]
 
 # --- SIDEBAR: CONFIGURATION ---
 with st.sidebar:
     st.header("⚙️ Configuration")
-    
     try:
         api_key = st.secrets.get("GEMINI_API_KEY")
     except Exception:
@@ -78,45 +115,49 @@ with st.sidebar:
 # --- MAIN LAYOUT ---
 col_left, col_right = st.columns([1, 1.5], gap="large")
 
-# ================= LEFT COLUMN (INPUTS) =================
+# ================= LEFT COLUMN =================
 with col_left:
-    # 1. INCOME & PERIOD CARD (NEW: Month/Year Selection)
     with st.container(border=True):
         st.subheader("📅 Period & Income")
         
-        # Date Selection Row
+        # DATE INPUTS (Restored from Memory)
         d_col1, d_col2 = st.columns(2)
         months = ["January", "February", "March", "April", "May", "June", 
                   "July", "August", "September", "October", "November", "December"]
-        current_month_index = datetime.now().month - 1
         
-        selected_month = d_col1.selectbox("Month", months, index=current_month_index)
-        selected_year = d_col2.number_input("Year", min_value=2020, max_value=2030, value=datetime.now().year)
+        # Get default from saved state or current date
+        def_month_idx = saved_state.get('month_index', datetime.now().month - 1) if saved_state else datetime.now().month - 1
+        def_year = saved_state.get('year', datetime.now().year) if saved_state else datetime.now().year
+
+        selected_month = d_col1.selectbox("Month", months, index=def_month_idx, key="month_select")
+        selected_year = d_col2.number_input("Year", min_value=2020, max_value=2030, value=def_year, key="year_input")
 
         st.divider()
         
-        # Income Inputs
-        st.caption("Income Details")
-        current_savings = st.number_input("Current Savings", value=10000.0, step=1000.0)
-        c1, c2 = st.columns(2)
-        basic_salary = c1.number_input("Basic Salary", value=6000.0)
-        allowances = c1.number_input("Allowances", value=500.0)
-        variable_income = c2.number_input("Side Income", value=0.0)
+        # INCOME INPUTS (Restored from Memory)
+        def_savings = saved_state.get('current_savings', 10000.0) if saved_state else 10000.0
+        def_salary = saved_state.get('basic_salary', 6000.0) if saved_state else 6000.0
+        def_allowance = saved_state.get('allowances', 500.0) if saved_state else 500.0
+        def_var = saved_state.get('variable_income', 0.0) if saved_state else 0.0
 
-    # 2. STATUTORY DEDUCTIONS CARD
+        current_savings = st.number_input("Current Savings", value=def_savings, step=1000.0, key="current_savings")
+        c1, c2 = st.columns(2)
+        basic_salary = c1.number_input("Basic Salary", value=def_salary, key="basic_salary")
+        allowances = c1.number_input("Allowances", value=def_allowance, key="allowances")
+        variable_income = c2.number_input("Side Income", value=def_var, key="variable_income")
+
     with st.container(border=True):
         st.subheader("📉 Statutory Deductions")
         
-        # EPF Section
-        st.caption("Employee Provident Fund (EPF)")
-        epf_rate = st.slider("EPF Rate (%)", 0, 20, 11) 
+        def_epf = saved_state.get('epf_rate', 11) if saved_state else 11
+        epf_rate = st.slider("EPF Rate (%)", 0, 20, def_epf, key="epf_rate") 
         epf_amount = (basic_salary + allowances) * (epf_rate / 100)
         st.markdown(f"**EPF Amount:** RM {epf_amount:.2f}")
         
         st.divider()
-        
-        # Other Deductions Table
         st.caption("Other Deductions (Editable)")
+        
+        # DEDUCTIONS TABLE
         df_deductions_input = pd.DataFrame(st.session_state.deductions_list)
         edited_deductions = st.data_editor(
             df_deductions_input,
@@ -128,16 +169,17 @@ with col_left:
                 "Amount": st.column_config.NumberColumn("Amount (RM)", format="%.2f")
             }
         )
+        # Update State immediately
         st.session_state.deductions_list = edited_deductions.to_dict('records')
         
         other_deductions_total = edited_deductions['Amount'].sum() if not edited_deductions.empty else 0
         total_deductions = epf_amount + other_deductions_total
-        
         st.markdown(f"#### Total Deducted: <span style='color:#e74c3c'>RM {total_deductions:.2f}</span>", unsafe_allow_html=True)
 
-    # 3. EXPENSES CARD
     with st.container(border=True):
         st.subheader("🧾 Living Expenses")
+        
+        # EXPENSES TABLE
         df_expenses_input = pd.DataFrame(st.session_state.expenses)
         edited_expenses = st.data_editor(
             df_expenses_input,
@@ -151,35 +193,31 @@ with col_left:
         )
         st.session_state.expenses = edited_expenses.to_dict('records')
 
-# ================= RIGHT COLUMN (VISUALS) =================
+# ================= RIGHT COLUMN =================
 with col_right:
-    # CALCS
+    # Calculations
     gross = basic_salary + allowances + variable_income
     net = gross - total_deductions
     total_exp = edited_expenses['Amount'].sum() if not edited_expenses.empty else 0
     balance = net - total_exp
 
-    # METRICS
+    # Metrics
     st.markdown(f"### Snapshot: {selected_month} {selected_year}")
     c1, c2 = st.columns(2)
-    with c1:
-        st.metric("Net Disposable Income", f"RM {net:.2f}")
-    with c2:
-        st.metric("Monthly Surplus", f"RM {balance:.2f}", delta=f"{balance:.2f}")
+    with c1: st.metric("Net Disposable Income", f"RM {net:.2f}")
+    with c2: st.metric("Monthly Surplus", f"RM {balance:.2f}", delta=f"{balance:.2f}")
 
-    # CHART
+    # Charts
     with st.container(border=True):
         if not edited_expenses.empty:
             fig = px.pie(edited_expenses, values='Amount', names='Category', hole=0.5, title="Expense Breakdown")
             fig.update_layout(height=300, margin=dict(t=30, b=0, l=0, r=0))
             st.plotly_chart(fig, use_container_width=True)
 
-    # TRAJECTORY
     with st.container(border=True):
         t_col1, t_col2 = st.columns([3, 1])
         t_col1.subheader("📈 Wealth Projection")
         duration_option = t_col2.selectbox("Projection", ["1 Year", "3 Years", "5 Years", "10 Years"], index=2)
-        
         duration_map = {"1 Year": 12, "3 Years": 36, "5 Years": 60, "10 Years": 120}
         months_to_project = duration_map[duration_option]
         
@@ -193,85 +231,48 @@ with col_right:
         fig2.update_layout(height=250, margin=dict(t=0, b=0, l=0, r=0))
         st.plotly_chart(fig2, use_container_width=True)
 
-    # DATA MANAGEMENT (UPDATED: Uses Selected Date)
+    # Data Management & History
     with st.container(border=True):
         st.subheader("💾 Data Management")
         db_col1, db_col2 = st.columns(2)
-        
-        # Logic to create a proper Date object from Month/Year selection
         month_map = {name: i+1 for i, name in enumerate(months)}
-        month_num = month_map[selected_month]
-        # Create a date string for sorting (e.g. 2025-10-01)
-        date_obj = datetime(selected_year, month_num, 1)
-        date_str = date_obj.strftime("%Y-%m-%d")
+        date_str = datetime(selected_year, month_map[selected_month], 1).strftime("%Y-%m-%d")
         
         current_data = {
-            "Date": date_str,  # SAVES YOUR SELECTED DATE
-            "Month": selected_month,
-            "Year": selected_year,
-            "Net_Income": net,
-            "Total_Expenses": total_exp,
-            "Balance": balance,
-            "EPF_Savings": epf_amount
+            "Date": date_str, "Month": selected_month, "Year": selected_year,
+            "Net_Income": net, "Total_Expenses": total_exp, "Balance": balance, "EPF_Savings": epf_amount
         }
         
         with db_col1:
             if st.button(f"Save {selected_month} {selected_year}"):
                 file_path = "financial_history.csv"
                 new_row = pd.DataFrame([current_data])
-                
                 if not os.path.exists(file_path):
                     new_row.to_csv(file_path, index=False)
-                    st.success(f"Created DB & Saved {selected_month}!")
                 else:
-                    # Append logic
                     new_row.to_csv(file_path, mode='a', header=False, index=False)
-                    st.success(f"Saved {selected_month} {selected_year} to history!")
-        
+                st.success("Saved to history!")
+
         with db_col2:
             if os.path.exists("financial_history.csv"):
                 with open("financial_history.csv", "rb") as f:
                     st.download_button("Download CSV", f, "financial_history.csv", "text/csv")
-                    # ... (after the download button code) ...
         
+        # HISTORICAL TREND CHART (Restored)
         st.divider()
-        st.subheader("📊 Historical Trends")
-        
         if os.path.exists("financial_history.csv"):
             history_df = pd.read_csv("financial_history.csv")
             if not history_df.empty:
-                # Ensure date is sorted
                 history_df['Date'] = pd.to_datetime(history_df['Date'])
                 history_df = history_df.sort_values('Date')
-                
-                # Plot the trend
-                fig_history = px.line(
-                    history_df, 
-                    x='Month', # or 'Date' if you prefer precise dates
-                    y=['Net_Income', 'Balance', 'Total_Expenses'], 
-                    markers=True,
-                    title="My Financial Evolution",
-                    color_discrete_map={
-                        "Net_Income": "#2ecc71", 
-                        "Total_Expenses": "#e74c3c", 
-                        "Balance": "#3498db"
-                    }
-                )
-                st.plotly_chart(fig_history, use_container_width=True)
-            else:
-                st.info("No history data found yet.")
-        else:
-            st.info("Save your first month to see the trend line!")
+                fig_hist = px.line(history_df, x='Date', y=['Net_Income', 'Balance'], markers=True, title="History Trend", height=250)
+                st.plotly_chart(fig_hist, use_container_width=True)
 
-    # AI AUDITOR
+    # AI Section
     st.markdown("###")
     with st.container():
-        st.markdown("""
-        <div style="background-color: #0f172a; padding: 20px; border-radius: 10px; color: white; border: 1px solid #334155; margin-bottom: 10px;">
-            <h3 style="margin:0;">✨ AI Financial Auditor</h3>
-            <p style="color: #94a3b8; font-size: 0.9em; margin:0;">Select a model and generate your audit.</p>
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown("""<div style="background-color: #0f172a; padding: 20px; border-radius: 10px; color: white; border: 1px solid #334155; margin-bottom: 10px;">
+            <h3 style="margin:0;">✨ AI Financial Auditor</h3></div>""", unsafe_allow_html=True)
         
         selected_model = st.selectbox("Select AI Model", st.session_state.available_models)
         
@@ -283,31 +284,27 @@ with col_right:
                     client = genai.Client(api_key=api_key)
                     deduction_txt = "\n".join([f"- {x['Category']}: RM {x['Amount']}" for x in st.session_state.deductions_list])
                     exp_txt = "\n".join([f"- {x['Category']}: RM {x['Amount']}" for x in st.session_state.expenses])
-                    
-                    prompt = f"""
-                    Role: Expert Malaysian Financial Planner.
-                    Context: Analysis for {selected_month} {selected_year}.
-                    Stats: Net Income: RM {net:.2f}, Expenses: RM {total_exp:.2f}, Balance: RM {balance:.2f}
-                    
-                    Statutory Deductions:
-                    - EPF: RM {epf_amount:.2f}
-                    {deduction_txt}
-                    
-                    Living Expenses:
-                    {exp_txt}
-                    
-                    Provide:
-                    1. Leakage Check (KL Cost of Living context)
-                    2. Tax Relief Suggestions (Malaysian Context)
-                    3. Researcher/Engineering Analogy for financial health.
-                    """
+                    prompt = f"""Role: Expert Malaysian Financial Planner. Context: {selected_month} {selected_year}.
+                    Stats: Net: RM {net:.2f}, Exp: RM {total_exp:.2f}, Bal: RM {balance:.2f}.
+                    Deductions: EPF: RM {epf_amount:.2f}\n{deduction_txt}
+                    Expenses: {exp_txt}
+                    Provide: 1. Leakage Check 2. Tax Reliefs 3. Researcher Analogy."""
                     
                     with st.spinner(f"Asking {selected_model}..."):
                         response = client.models.generate_content(model=selected_model, contents=prompt)
-                        st.markdown(f"""
-                        <div style="background-color: #1e293b; padding: 20px; border-radius: 10px; color: #e2e8f0; border-left: 5px solid #8b5cf6;">
-                            {response.text}
-                        </div>
-                        """, unsafe_allow_html=True)
+                        st.markdown(f"""<div style="background-color: #1e293b; padding: 20px; border-radius: 10px; color: #e2e8f0; border-left: 5px solid #8b5cf6;">{response.text}</div>""", unsafe_allow_html=True)
                 except Exception as e:
                     st.error(f"Error: {e}")
+
+# --- AUTO-SAVE TRIGGER ---
+# We update the internal state dictionary with current widget values before saving
+st.session_state.month_index = months.index(selected_month)
+st.session_state.year = selected_year
+st.session_state.basic_salary = basic_salary
+st.session_state.allowances = allowances
+st.session_state.variable_income = variable_income
+st.session_state.current_savings = current_savings
+st.session_state.epf_rate = epf_rate
+
+# Trigger Save
+save_state_to_file()
