@@ -180,7 +180,7 @@ with st.sidebar:
             with st.spinner("Downloading..."):
                 cloud_state = load_cloud_state()
                 if cloud_state:
-                    # KEY FIX: Explicitly update session keys
+                    # Explicitly update session keys
                     st.session_state["basic_salary"] = float(cloud_state.get('basic_salary', 0.0))
                     st.session_state["allowances"] = float(cloud_state.get('allowances', 0.0))
                     st.session_state["variable_income"] = float(cloud_state.get('variable_income', 0.0))
@@ -209,13 +209,17 @@ with st.sidebar:
     st.divider()
     with st.expander("🤖 AI Auto-Fill (Magic)"):
         st.caption("Describe a persona, and AI will fill the dashboard for you.")
+        
+        # --- NEW: Model Selector for Auto-Fill ---
+        selected_fill_model = st.selectbox("Select Model", st.session_state.available_models, index=0, key="fill_model_select")
+        
         user_persona = st.text_area("Scenario:", placeholder="e.g., Senior Lecturer in KL with 2 kids and a Honda City loan.", height=70)
         
         if st.button("✨ Fill Dashboard"):
             if not api_key:
                 st.error("Please enter API Key first.")
             else:
-                with st.spinner("AI is generating a realistic profile..."):
+                with st.spinner(f"Generating with {selected_fill_model}..."):
                     try:
                         client = genai.Client(api_key=api_key)
                         
@@ -249,7 +253,7 @@ with st.sidebar:
                         final_prompt = prompt_structure.format(persona=user_persona if user_persona else "Average Malaysian Executive")
                         
                         response = client.models.generate_content(
-                            model="gemini-2.0-flash-exp", 
+                            model=selected_fill_model, # Using the selected model
                             contents=final_prompt
                         )
                         
@@ -449,12 +453,12 @@ with col_right:
         else:
             st.info("No history found in Cloud.")
 
-    # --- AI FINANCIAL AUDITOR (PRESERVED) ---
+    # --- AI FINANCIAL AUDITOR ---
     st.markdown("###")
     with st.container():
         st.markdown("""<div style="background-color: #0f172a; padding: 20px; border-radius: 10px; color: white; border: 1px solid #334155; margin-bottom: 10px;">
             <h3 style="margin:0;">✨ AI Financial Auditor</h3></div>""", unsafe_allow_html=True)
-        selected_model = st.selectbox("Select AI Model", st.session_state.available_models)
+        selected_auditor_model = st.selectbox("Select AI Model", st.session_state.available_models, key="auditor_model_select")
         if st.button("🚀 Generate Analysis", type="primary"):
             if not api_key: st.warning("API Key required.")
             else:
@@ -467,7 +471,7 @@ with col_right:
                     Deductions: EPF: RM {epf_amount:.2f}\n{deduction_txt}
                     Expenses: {exp_txt}
                     Provide: 1. Leakage Check 2. Tax Reliefs 3. Researcher Analogy."""
-                    with st.spinner(f"Asking {selected_model}..."):
-                        response = client.models.generate_content(model=selected_model, contents=prompt)
+                    with st.spinner(f"Asking {selected_auditor_model}..."):
+                        response = client.models.generate_content(model=selected_auditor_model, contents=prompt)
                         st.markdown(f"""<div style="background-color: #1e293b; padding: 20px; border-radius: 10px; color: #e2e8f0; border-left: 5px solid #8b5cf6;">{response.text}</div>""", unsafe_allow_html=True)
                 except Exception as e: st.error(f"Error: {e}")
