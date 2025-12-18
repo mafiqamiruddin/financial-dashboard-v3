@@ -5,6 +5,8 @@ import plotly.express as px
 import os
 import json
 from datetime import datetime
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="MY Financial Dashboard", layout="wide", initial_sidebar_state="expanded")
@@ -17,21 +19,77 @@ st.markdown("""
     [data-testid="stMetricValue"] { font-size: 24px; color: #2c3e50; }
     .stButton>button { width: 100%; border-radius: 8px; font-weight: bold; }
     [data-testid="stDataEditor"] { border: 1px solid #e0e0e0; border-radius: 10px; }
-    /* Red styling for delete buttons */
-    .delete-btn { border: 1px solid #ef4444; color: #ef4444; }
-    .delete-btn:hover { background-color: #fee2e2; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- STATE MANAGEMENT SYSTEM ---
-STATE_FILE = "app_state.json"
-HISTORY_FILE = "financial_history.csv"
+# --- GOOGLE SHEETS CONNECTION ---
+def get_google_sheet_client():
+    try:
+        # Load credentials from Streamlit Secrets
+        creds_json = json.loads(st.secrets["GCP_CREDENTIALS"])
+        scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_json, scope)
+        client = gspread.authorize(creds)
+        return client
+    except Exception as e:
+        st.error(f"Secret Error: {e}")
+        return None
 
-def save_state_to_file():
-    """Saves the current session state to a local JSON file."""
+def get_sheet_data(worksheet_name):
+    client = get_google_sheet_client()
+    if client:
+        try:
+            sheet = client.open_by_url(st.secrets["SHEET_URL"])
+            ws = sheet.worksheet(worksheet_name)
+            data = ws.get_all_records()
+            return pd.DataFrame(data)
+        except Exception as e:
+            # If worksheet doesn't exist, return empty
+            return pd.DataFrame()
+    return pd.DataFrame()
+
+def save_row_to_sheet(worksheet_name, row_data_dict):
+    client = get_google_sheet_client()
+    if client:
+        sheet = client.open_by_url(st.secrets["SHEET_URL"])
+        try:
+            ws = sheet.worksheet(worksheet_name)
+        except:
+            # Create if missing
+            ws = sheet.add_worksheet(title=worksheet_name, rows=100, cols=20)
+            # Add headers
+            ws.append_row(list(row_data_dict.keys()))
+            
+        # Append data
+        ws.append_row(list(row_data_dict.values()))
+
+def delete_rows_from_sheet(worksheet_name, month_year_list):
+    """Surgical delete based on Month+Year label"""
+    client = get_google_sheet_client()
+    if client:
+        sheet = client.open_by_url(st.secrets["SHEET_URL"])
+        ws = sheet.worksheet(worksheet_name)
+        data = ws.get_all_records()
+        df = pd.DataFrame(data)
+        
+        # Create label column to match selection
+        df['Label'] = df['Month'] + " " + df['Year'].astype(str)
+        
+        # Filter keep rows
+        df_clean = df[~df['Label'].isin(month_year_list)]
+        df_clean = df_clean.drop(columns=['Label'])
+        
+        # Clear and rewrite
+        ws.clear()
+        ws.update([df_clean.columns.values.tolist()] + df_clean.values.tolist())
+
+# --- SAVE/LOAD STATE (CLOUD PERSISTENCE) ---
+# We use the "State" tab in Google Sheets to act as the "Auto-Save" memory
+def save_cloud_state():
     state_data = {
-        "expenses": st.session_state.get('expenses', []),
-        "deductions_list": st.session_state.get('deductions_list', []),
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "expenses": json.dumps(st.session_state.get('expenses', [])),
+        "deductions": json.dumps(st.session_state.get('deductions_list', [])),
         "basic_salary": st.session_state.get('basic_salary', 6000.0),
         "allowances": st.session_state.get('allowances', 500.0),
         "variable_income": st.session_state.get('variable_income', 0.0),
@@ -40,31 +98,49 @@ def save_state_to_file():
         "month_select": st.session_state.get('month_select', "December"),
         "year_input": st.session_state.get('year_input', datetime.now().year),
     }
-    try:
-        with open(STATE_FILE, "w") as f:
-            json.dump(state_data, f)
-    except Exception as e:
-        print(f"Auto-save failed: {e}")
-
-def load_state_from_file():
-    """Loads the last saved state from the local JSON file."""
-    if os.path.exists(STATE_FILE):
+    
+    # We overwrite the 'State' tab completely
+    client = get_google_sheet_client()
+    if client:
+        sheet = client.open_by_url(st.secrets["SHEET_URL"])
         try:
-            with open(STATE_FILE, "r") as f:
-                return json.load(f)
+            ws = sheet.worksheet("State")
+            ws.clear()
+        except:
+            ws = sheet.add_worksheet(title="State", rows=2, cols=10)
+        
+        # Write headers and values
+        ws.append_row(list(state_data.keys()))
+        ws.append_row(list(state_data.values()))
+
+def load_cloud_state():
+    client = get_google_sheet_client()
+    if client:
+        try:
+            sheet = client.open_by_url(st.secrets["SHEET_URL"])
+            ws = sheet.worksheet("State")
+            data = ws.get_all_records()
+            if data:
+                return data[-1] # Return last saved state
         except:
             return None
     return None
 
 # --- INITIALIZATION ---
-saved_state = load_state_from_file()
-
-if saved_state:
-    if 'expenses' not in st.session_state: st.session_state.expenses = saved_state.get('expenses')
-    if 'deductions_list' not in st.session_state: st.session_state.deductions_list = saved_state.get('deductions_list')
-else:
-    # Defaults
-    if 'expenses' not in st.session_state:
+if 'data_loaded' not in st.session_state:
+    cloud_state = load_cloud_state()
+    if cloud_state:
+        st.session_state.expenses = json.loads(cloud_state.get('expenses', '[]'))
+        st.session_state.deductions_list = json.loads(cloud_state.get('deductions', '[]'))
+        st.session_state.loaded_salary = float(cloud_state.get('basic_salary', 6000.0))
+        st.session_state.loaded_allowances = float(cloud_state.get('allowances', 500.0))
+        st.session_state.loaded_var = float(cloud_state.get('variable_income', 0.0))
+        st.session_state.loaded_savings = float(cloud_state.get('current_savings', 10000.0))
+        st.session_state.loaded_epf = int(cloud_state.get('epf_rate', 11))
+        st.session_state.loaded_month = cloud_state.get('month_select', "December")
+        st.session_state.loaded_year = int(cloud_state.get('year_input', datetime.now().year))
+    else:
+        # Defaults
         st.session_state.expenses = [
             {"Category": "Housing (Rent/Loan)", "Amount": 1500.0},
             {"Category": "Car Loan/Transport", "Amount": 800.0},
@@ -73,115 +149,87 @@ else:
             {"Category": "PTPTN / Education Loan", "Amount": 200.0},
             {"Category": "Savings / Investments", "Amount": 500.0},
         ]
-    if 'deductions_list' not in st.session_state:
         st.session_state.deductions_list = [
             {"Category": "SOCSO / PERKESO", "Amount": 19.75},
             {"Category": "EIS / SIP", "Amount": 7.90},
             {"Category": "PCB (Monthly Tax)", "Amount": 300.00},
         ]
+        st.session_state.loaded_salary = 6000.0
+        st.session_state.loaded_allowances = 500.0
+        st.session_state.loaded_var = 0.0
+        st.session_state.loaded_savings = 10000.0
+        st.session_state.loaded_epf = 11
+        st.session_state.loaded_month = "December"
+        st.session_state.loaded_year = datetime.now().year
+    
+    st.session_state.data_loaded = True
 
 if 'available_models' not in st.session_state:
     st.session_state.available_models = ["gemini-1.5-flash", "gemini-2.0-flash-exp"]
 
-# --- SIDEBAR: CONFIGURATION & RESET ---
+# --- SIDEBAR ---
 with st.sidebar:
     st.header("⚙️ Configuration")
-    try:
-        api_key = st.secrets.get("GEMINI_API_KEY")
-    except Exception:
-        api_key = None
-
+    api_key = st.secrets.get("GEMINI_API_KEY", None)
     if not api_key:
         api_key = st.text_input("Enter Gemini API Key", type="password")
-        if api_key:
-            st.session_state.temp_key = api_key
     else:
-        st.success("API Key loaded from Secrets! 🔒")
+        st.success("Gemini API Key Connected! 🔒")
+    
+    # Check GSheets
+    if "GCP_CREDENTIALS" in st.secrets:
+        st.success("Google Sheets Connected! ☁️")
+    else:
+        st.error("Missing Google Cloud Credentials in Secrets.")
 
     st.divider()
     if st.button("🛠️ Check Available Models"):
-        if not api_key:
-            st.error("Please enter API Key first.")
+        if not api_key: st.error("API Key required.")
         else:
             try:
                 client = genai.Client(api_key=api_key)
                 models = client.models.list()
                 fetched = [m.name.replace("models/", "") for m in models if "gemini" in m.name and "embedding" not in m.name]
-                if fetched:
-                    st.session_state.available_models = sorted(fetched)
-                    st.success(f"Found {len(fetched)} models!")
-            except Exception as e:
-                st.error(f"Connection Error: {e}")
-    
+                if fetched: st.session_state.available_models = sorted(fetched); st.success(f"Found {len(fetched)} models!")
+            except Exception as e: st.error(f"Error: {e}")
+
     st.divider()
-    st.markdown("### ⚠️ Danger Zone")
-    if st.button("🔄 Reset Current Form", help="Clears all inputs to zero and wipes auto-save memory."):
-        # 1. Clear Session State Logic
-        st.session_state.expenses = []
-        st.session_state.deductions_list = []
-        if os.path.exists(STATE_FILE):
-            os.remove(STATE_FILE)
-        
-        # Reset defaults in memory to 0
-        st.session_state.basic_salary = 0.0
-        st.session_state.allowances = 0.0
-        st.session_state.variable_income = 0.0
-        st.session_state.current_savings = 0.0
-        
-        st.rerun() 
+    if st.button("💾 Force Save Current State"):
+        save_cloud_state()
+        st.success("Draft saved to Cloud!")
 
 # --- MAIN LAYOUT ---
 col_left, col_right = st.columns([1, 1.5], gap="large")
 
-# ================= LEFT COLUMN =================
 with col_left:
     with st.container(border=True):
         st.subheader("📅 Period & Income")
         d_col1, d_col2 = st.columns(2)
-        months = ["January", "February", "March", "April", "May", "June", 
-                  "July", "August", "September", "October", "November", "December"]
+        months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
         
-        if saved_state and 'month_select' in saved_state:
-            try: def_month_idx = months.index(saved_state['month_select'])
-            except: def_month_idx = datetime.now().month - 1
-        else:
-            def_month_idx = datetime.now().month - 1
-        def_year = saved_state.get('year_input', datetime.now().year) if saved_state else datetime.now().year
-
-        selected_month = d_col1.selectbox("Month", months, index=def_month_idx, key="month_select")
-        selected_year = d_col2.number_input("Year", min_value=2020, max_value=2030, value=def_year, key="year_input")
+        try: def_idx = months.index(st.session_state.loaded_month)
+        except: def_idx = 0
+            
+        selected_month = d_col1.selectbox("Month", months, index=def_idx, key="month_select")
+        selected_year = d_col2.number_input("Year", min_value=2020, max_value=2030, value=st.session_state.loaded_year, key="year_input")
 
         st.divider()
-        
-        # INCOME
-        def_savings = saved_state.get('current_savings', 10000.0) if saved_state else 10000.0
-        def_salary = saved_state.get('basic_salary', 6000.0) if saved_state else 6000.0
-        def_allowance = saved_state.get('allowances', 500.0) if saved_state else 500.0
-        def_var = saved_state.get('variable_income', 0.0) if saved_state else 0.0
-
-        if not saved_state and not os.path.exists(STATE_FILE): 
-             def_savings = 0.0; def_salary = 0.0; def_allowance = 0.0; def_var = 0.0
-
-        current_savings = st.number_input("Current Savings", value=def_savings, step=1000.0, key="current_savings")
+        current_savings = st.number_input("Current Savings", value=st.session_state.loaded_savings, step=1000.0, key="current_savings")
         c1, c2 = st.columns(2)
-        basic_salary = c1.number_input("Basic Salary", value=def_salary, key="basic_salary")
-        allowances = c1.number_input("Allowances", value=def_allowance, key="allowances")
-        variable_income = c2.number_input("Side Income", value=def_var, key="variable_income")
+        basic_salary = c1.number_input("Basic Salary", value=st.session_state.loaded_salary, key="basic_salary")
+        allowances = c1.number_input("Allowances", value=st.session_state.loaded_allowances, key="allowances")
+        variable_income = c2.number_input("Side Income", value=st.session_state.loaded_var, key="variable_income")
 
     with st.container(border=True):
         st.subheader("📉 Statutory Deductions")
-        def_epf = saved_state.get('epf_rate', 11) if saved_state else 11
-        epf_rate = st.slider("EPF Rate (%)", 0, 20, def_epf, key="epf_rate") 
+        epf_rate = st.slider("EPF Rate (%)", 0, 20, st.session_state.loaded_epf, key="epf_rate") 
         epf_amount = (basic_salary + allowances) * (epf_rate / 100)
         st.markdown(f"**EPF Amount:** RM {epf_amount:.2f}")
+        
         st.divider()
         st.caption("Other Deductions")
-        
         df_deductions_input = pd.DataFrame(st.session_state.deductions_list)
-        edited_deductions = st.data_editor(
-            df_deductions_input, num_rows="dynamic", use_container_width=True, key="deductions_editor",
-            column_config={"Category": st.column_config.TextColumn("Deduction Name"), "Amount": st.column_config.NumberColumn("Amount (RM)", format="%.2f")}
-        )
+        edited_deductions = st.data_editor(df_deductions_input, num_rows="dynamic", use_container_width=True, key="deductions_editor", column_config={"Category": st.column_config.TextColumn("Deduction Name"), "Amount": st.column_config.NumberColumn("Amount (RM)", format="%.2f")})
         st.session_state.deductions_list = edited_deductions.to_dict('records')
         total_deductions = epf_amount + (edited_deductions['Amount'].sum() if not edited_deductions.empty else 0)
         st.markdown(f"#### Total Deducted: <span style='color:#e74c3c'>RM {total_deductions:.2f}</span>", unsafe_allow_html=True)
@@ -189,13 +237,9 @@ with col_left:
     with st.container(border=True):
         st.subheader("🧾 Living Expenses")
         df_expenses_input = pd.DataFrame(st.session_state.expenses)
-        edited_expenses = st.data_editor(
-            df_expenses_input, num_rows="dynamic", use_container_width=True, key="expenses_editor",
-            column_config={"Category": st.column_config.TextColumn("Expense Category"), "Amount": st.column_config.NumberColumn("Amount (RM)", format="%.2f")}
-        )
+        edited_expenses = st.data_editor(df_expenses_input, num_rows="dynamic", use_container_width=True, key="expenses_editor", column_config={"Category": st.column_config.TextColumn("Expense Category"), "Amount": st.column_config.NumberColumn("Amount (RM)", format="%.2f")})
         st.session_state.expenses = edited_expenses.to_dict('records')
 
-# ================= RIGHT COLUMN =================
 with col_right:
     gross = basic_salary + allowances + variable_income
     net = gross - total_deductions
@@ -204,7 +248,7 @@ with col_right:
 
     st.markdown(f"### Snapshot: {selected_month} {selected_year}")
     c1, c2 = st.columns(2)
-    with c1: st.metric("Net Disposable Income", f"RM {net:.2f}")
+    with c1: st.metric("Net Disposable", f"RM {net:.2f}")
     with c2: st.metric("Monthly Surplus", f"RM {balance:.2f}", delta=f"{balance:.2f}")
 
     with st.container(border=True):
@@ -213,95 +257,54 @@ with col_right:
             fig.update_layout(height=300, margin=dict(t=30, b=0, l=0, r=0))
             st.plotly_chart(fig, use_container_width=True)
 
+    # --- DATA MANAGEMENT (GOOGLE SHEETS) ---
     with st.container(border=True):
-        t_col1, t_col2 = st.columns([3, 1])
-        t_col1.subheader("📈 Wealth Projection")
-        duration_option = t_col2.selectbox("Projection", ["1 Year", "3 Years", "5 Years", "10 Years"], index=2)
-        duration_map = {"1 Year": 12, "3 Years": 36, "5 Years": 60, "10 Years": 120}
-        months_to_project = duration_map[duration_option]
-        
-        future = []
-        acc = current_savings
-        for m in range(months_to_project):
-            acc += balance
-            future.append({"Month": m+1, "Wealth": acc})
-        
-        fig2 = px.area(pd.DataFrame(future), x="Month", y="Wealth", color_discrete_sequence=['#2ecc71'])
-        fig2.update_layout(height=250, margin=dict(t=0, b=0, l=0, r=0))
-        st.plotly_chart(fig2, use_container_width=True)
-
-    # --- DATA MANAGEMENT (UPGRADED V6.3) ---
-    with st.container(border=True):
-        st.subheader("💾 Data Management")
+        st.subheader("☁️ Cloud Database (Google Sheets)")
         db_col1, db_col2 = st.columns(2)
-        month_map = {name: i+1 for i, name in enumerate(months)}
-        date_str = datetime(selected_year, month_map[selected_month], 1).strftime("%Y-%m-%d")
         
         current_data = {
-            "Date": date_str, "Month": selected_month, "Year": selected_year,
+            "Date": datetime(selected_year, months.index(selected_month)+1, 1).strftime("%Y-%m-%d"),
+            "Month": selected_month, "Year": selected_year,
             "Net_Income": net, "Total_Expenses": total_exp, "Balance": balance, "EPF_Savings": epf_amount
         }
         
-        # 1. SAVE BUTTON
         with db_col1:
             if st.button(f"Save {selected_month} {selected_year}"):
-                new_row = pd.DataFrame([current_data])
-                if not os.path.exists(HISTORY_FILE):
-                    new_row.to_csv(HISTORY_FILE, index=False)
-                else:
-                    new_row.to_csv(HISTORY_FILE, mode='a', header=False, index=False)
-                st.success("Saved!")
+                with st.spinner("Saving to Google Sheets..."):
+                    save_row_to_sheet("History", current_data)
+                    save_cloud_state() # Also save current draft inputs
+                    st.success("Saved permanently to Cloud!")
+                    st.rerun()
 
-        # 2. DOWNLOAD BUTTON
-        with db_col2:
-            if os.path.exists(HISTORY_FILE):
-                with open(HISTORY_FILE, "rb") as f:
-                    st.download_button("Download CSV", f, HISTORY_FILE, "text/csv")
-        
-        # 3. SURGICAL DELETE (MULTI-SELECT)
         st.divider()
-        if os.path.exists(HISTORY_FILE):
-            try:
-                # Read history to find unique Month-Year combinations
-                df_hist = pd.read_csv(HISTORY_FILE)
-                if not df_hist.empty:
-                    # Create a readable "Label" column (e.g. "December 2025")
-                    df_hist['Label'] = df_hist['Month'] + " " + df_hist['Year'].astype(str)
-                    
-                    # Get unique labels for the dropdown
-                    available_records = df_hist['Label'].unique().tolist()
-                    
-                    # The Multi-Select Box
-                    st.caption("Select months to remove from database:")
-                    to_delete = st.multiselect("Select records", available_records)
-                    
-                    if to_delete:
-                        if st.button(f"🗑️ Delete {len(to_delete)} Selected Record(s)"):
-                            # Filter out the rows that match the selected labels
-                            df_clean = df_hist[~df_hist['Label'].isin(to_delete)]
-                            
-                            # Drop the temporary 'Label' column before saving back
-                            df_clean = df_clean.drop(columns=['Label'])
-                            
-                            # Overwrite CSV
-                            df_clean.to_csv(HISTORY_FILE, index=False)
-                            st.success(f"Deleted: {', '.join(to_delete)}")
-                            st.rerun()
-                else:
-                    st.info("Database is empty.")
-            except Exception as e:
-                st.error(f"Error reading DB: {e}")
+        # History Logic
+        df_hist = get_sheet_data("History")
+        if not df_hist.empty:
+            # Multi-select Delete
+            df_hist['Label'] = df_hist['Month'] + " " + df_hist['Year'].astype(str)
+            to_delete = st.multiselect("Select records to delete from Cloud:", df_hist['Label'].unique())
+            if to_delete:
+                if st.button("🗑️ Delete Selected from Cloud"):
+                    with st.spinner("Deleting..."):
+                        delete_rows_from_sheet("History", to_delete)
+                        st.success("Deleted!")
+                        st.rerun()
+            
+            # Chart
+            st.caption("History Trend")
+            df_hist['Date'] = pd.to_datetime(df_hist['Date'])
+            df_hist = df_hist.sort_values('Date')
+            fig_hist = px.line(df_hist, x='Date', y=['Net_Income', 'Balance'], markers=True, height=250)
+            st.plotly_chart(fig_hist, use_container_width=True)
         else:
-            st.info("No database found yet. Save a month to start!")
+            st.info("No history found in Google Sheet.")
 
     # AI Section
     st.markdown("###")
     with st.container():
         st.markdown("""<div style="background-color: #0f172a; padding: 20px; border-radius: 10px; color: white; border: 1px solid #334155; margin-bottom: 10px;">
             <h3 style="margin:0;">✨ AI Financial Auditor</h3></div>""", unsafe_allow_html=True)
-        
         selected_model = st.selectbox("Select AI Model", st.session_state.available_models)
-        
         if st.button("🚀 Generate Analysis", type="primary"):
             if not api_key: st.warning("API Key required.")
             else:
@@ -314,11 +317,10 @@ with col_right:
                     Deductions: EPF: RM {epf_amount:.2f}\n{deduction_txt}
                     Expenses: {exp_txt}
                     Provide: 1. Leakage Check 2. Tax Reliefs 3. Researcher Analogy."""
-                    
                     with st.spinner(f"Asking {selected_model}..."):
                         response = client.models.generate_content(model=selected_model, contents=prompt)
                         st.markdown(f"""<div style="background-color: #1e293b; padding: 20px; border-radius: 10px; color: #e2e8f0; border-left: 5px solid #8b5cf6;">{response.text}</div>""", unsafe_allow_html=True)
                 except Exception as e: st.error(f"Error: {e}")
 
-# --- AUTO-SAVE ---
-save_state_to_file()
+# Auto-save Draft state to Cloud periodically (or via manual button to stay fast)
+# We avoid auto-saving on every keystroke to prevent API rate limits, relying on the 'Save' button or 'Force Save' sidebar button.
