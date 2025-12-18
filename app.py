@@ -22,18 +22,19 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- GOOGLE SHEETS CONNECTION ---
+# --- GOOGLE SHEETS FUNCTIONS ---
 def get_google_sheet_client():
     try:
         # Load credentials from Streamlit Secrets
-        creds_json = json.loads(st.secrets["GCP_CREDENTIALS"])
-        scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_json, scope)
-        client = gspread.authorize(creds)
-        return client
+        if "GCP_CREDENTIALS" in st.secrets:
+            creds_json = json.loads(st.secrets["GCP_CREDENTIALS"])
+            scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
+            creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_json, scope)
+            client = gspread.authorize(creds)
+            return client
     except Exception as e:
         st.error(f"Secret Error: {e}")
-        return None
+    return None
 
 def get_sheet_data(worksheet_name):
     client = get_google_sheet_client()
@@ -43,8 +44,7 @@ def get_sheet_data(worksheet_name):
             ws = sheet.worksheet(worksheet_name)
             data = ws.get_all_records()
             return pd.DataFrame(data)
-        except Exception as e:
-            # If worksheet doesn't exist, return empty
+        except:
             return pd.DataFrame()
     return pd.DataFrame()
 
@@ -55,20 +55,16 @@ def save_row_to_sheet(worksheet_name, row_data_dict):
         try:
             ws = sheet.worksheet(worksheet_name)
         except:
-            # Create if missing
             ws = sheet.add_worksheet(title=worksheet_name, rows=100, cols=20)
-        
-        # KEY FIX: Check if the sheet is actually empty
+            
+        # FIX: Check if empty, if so, add headers first
         existing_data = ws.get_all_values()
         if not existing_data:
-            # If empty, write the HEADERS first
             ws.append_row(list(row_data_dict.keys()))
             
-        # Then append the DATA
         ws.append_row(list(row_data_dict.values()))
 
 def delete_rows_from_sheet(worksheet_name, month_year_list):
-    """Surgical delete based on Month+Year label"""
     client = get_google_sheet_client()
     if client:
         sheet = client.open_by_url(st.secrets["SHEET_URL"])
@@ -76,19 +72,14 @@ def delete_rows_from_sheet(worksheet_name, month_year_list):
         data = ws.get_all_records()
         df = pd.DataFrame(data)
         
-        # Create label column to match selection
         df['Label'] = df['Month'] + " " + df['Year'].astype(str)
-        
-        # Filter keep rows
         df_clean = df[~df['Label'].isin(month_year_list)]
         df_clean = df_clean.drop(columns=['Label'])
         
-        # Clear and rewrite
         ws.clear()
         ws.update([df_clean.columns.values.tolist()] + df_clean.values.tolist())
 
-# --- SAVE/LOAD STATE (CLOUD PERSISTENCE) ---
-# We use the "State" tab in Google Sheets to act as the "Auto-Save" memory
+# --- CLOUD STATE (AUTO-SAVE) ---
 def save_cloud_state():
     state_data = {
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -102,18 +93,12 @@ def save_cloud_state():
         "month_select": st.session_state.get('month_select', "December"),
         "year_input": st.session_state.get('year_input', datetime.now().year),
     }
-    
-    # We overwrite the 'State' tab completely
     client = get_google_sheet_client()
     if client:
         sheet = client.open_by_url(st.secrets["SHEET_URL"])
-        try:
-            ws = sheet.worksheet("State")
-            ws.clear()
-        except:
-            ws = sheet.add_worksheet(title="State", rows=2, cols=10)
-        
-        # Write headers and values
+        try: ws = sheet.worksheet("State")
+        except: ws = sheet.add_worksheet(title="State", rows=2, cols=10)
+        ws.clear()
         ws.append_row(list(state_data.keys()))
         ws.append_row(list(state_data.values()))
 
@@ -124,10 +109,8 @@ def load_cloud_state():
             sheet = client.open_by_url(st.secrets["SHEET_URL"])
             ws = sheet.worksheet("State")
             data = ws.get_all_records()
-            if data:
-                return data[-1] # Return last saved state
-        except:
-            return None
+            if data: return data[-1]
+        except: return None
     return None
 
 # --- INITIALIZATION ---
@@ -144,7 +127,6 @@ if 'data_loaded' not in st.session_state:
         st.session_state.loaded_month = cloud_state.get('month_select', "December")
         st.session_state.loaded_year = int(cloud_state.get('year_input', datetime.now().year))
     else:
-        # Defaults
         st.session_state.expenses = [
             {"Category": "Housing (Rent/Loan)", "Amount": 1500.0},
             {"Category": "Car Loan/Transport", "Amount": 800.0},
@@ -175,16 +157,11 @@ if 'available_models' not in st.session_state:
 with st.sidebar:
     st.header("⚙️ Configuration")
     api_key = st.secrets.get("GEMINI_API_KEY", None)
-    if not api_key:
-        api_key = st.text_input("Enter Gemini API Key", type="password")
-    else:
-        st.success("Gemini API Key Connected! 🔒")
+    if not api_key: api_key = st.text_input("Enter Gemini API Key", type="password")
+    else: st.success("Gemini API Key Connected! 🔒")
     
-    # Check GSheets
-    if "GCP_CREDENTIALS" in st.secrets:
-        st.success("Google Sheets Connected! ☁️")
-    else:
-        st.error("Missing Google Cloud Credentials in Secrets.")
+    if "GCP_CREDENTIALS" in st.secrets: st.success("Google Sheets Connected! ☁️")
+    else: st.error("Missing Google Cloud Credentials.")
 
     st.divider()
     if st.button("🛠️ Check Available Models"):
@@ -196,7 +173,7 @@ with st.sidebar:
                 fetched = [m.name.replace("models/", "") for m in models if "gemini" in m.name and "embedding" not in m.name]
                 if fetched: st.session_state.available_models = sorted(fetched); st.success(f"Found {len(fetched)} models!")
             except Exception as e: st.error(f"Error: {e}")
-
+            
     st.divider()
     if st.button("💾 Force Save Current State"):
         save_cloud_state()
@@ -210,13 +187,10 @@ with col_left:
         st.subheader("📅 Period & Income")
         d_col1, d_col2 = st.columns(2)
         months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
-        
         try: def_idx = months.index(st.session_state.loaded_month)
         except: def_idx = 0
-            
         selected_month = d_col1.selectbox("Month", months, index=def_idx, key="month_select")
         selected_year = d_col2.number_input("Year", min_value=2020, max_value=2030, value=st.session_state.loaded_year, key="year_input")
-
         st.divider()
         current_savings = st.number_input("Current Savings", value=st.session_state.loaded_savings, step=1000.0, key="current_savings")
         c1, c2 = st.columns(2)
@@ -229,7 +203,6 @@ with col_left:
         epf_rate = st.slider("EPF Rate (%)", 0, 20, st.session_state.loaded_epf, key="epf_rate") 
         epf_amount = (basic_salary + allowances) * (epf_rate / 100)
         st.markdown(f"**EPF Amount:** RM {epf_amount:.2f}")
-        
         st.divider()
         st.caption("Other Deductions")
         df_deductions_input = pd.DataFrame(st.session_state.deductions_list)
@@ -261,9 +234,27 @@ with col_right:
             fig.update_layout(height=300, margin=dict(t=30, b=0, l=0, r=0))
             st.plotly_chart(fig, use_container_width=True)
 
-    # --- DATA MANAGEMENT (GOOGLE SHEETS) ---
+    # --- RESTORED: WEALTH TRAJECTORY ---
     with st.container(border=True):
-        st.subheader("☁️ Cloud Database (Google Sheets)")
+        t_col1, t_col2 = st.columns([3, 1])
+        t_col1.subheader("📈 Wealth Projection")
+        duration_option = t_col2.selectbox("Projection", ["1 Year", "3 Years", "5 Years", "10 Years"], index=2)
+        duration_map = {"1 Year": 12, "3 Years": 36, "5 Years": 60, "10 Years": 120}
+        months_to_project = duration_map[duration_option]
+        
+        future = []
+        acc = current_savings
+        for m in range(months_to_project):
+            acc += balance
+            future.append({"Month": m+1, "Wealth": acc})
+        
+        fig2 = px.area(pd.DataFrame(future), x="Month", y="Wealth", color_discrete_sequence=['#2ecc71'])
+        fig2.update_layout(height=250, margin=dict(t=0, b=0, l=0, r=0))
+        st.plotly_chart(fig2, use_container_width=True)
+
+    # --- GOOGLE SHEETS MANAGEMENT ---
+    with st.container(border=True):
+        st.subheader("☁️ Cloud Database")
         db_col1, db_col2 = st.columns(2)
         
         current_data = {
@@ -274,34 +265,30 @@ with col_right:
         
         with db_col1:
             if st.button(f"Save {selected_month} {selected_year}"):
-                with st.spinner("Saving to Google Sheets..."):
+                with st.spinner("Saving..."):
                     save_row_to_sheet("History", current_data)
-                    save_cloud_state() # Also save current draft inputs
-                    st.success("Saved permanently to Cloud!")
+                    save_cloud_state()
+                    st.success("Saved!")
                     st.rerun()
 
         st.divider()
-        # History Logic
         df_hist = get_sheet_data("History")
         if not df_hist.empty:
-            # Multi-select Delete
             df_hist['Label'] = df_hist['Month'] + " " + df_hist['Year'].astype(str)
-            to_delete = st.multiselect("Select records to delete from Cloud:", df_hist['Label'].unique())
+            to_delete = st.multiselect("Select records to delete:", df_hist['Label'].unique())
             if to_delete:
-                if st.button("🗑️ Delete Selected from Cloud"):
-                    with st.spinner("Deleting..."):
-                        delete_rows_from_sheet("History", to_delete)
-                        st.success("Deleted!")
-                        st.rerun()
+                if st.button("🗑️ Delete Selected"):
+                    delete_rows_from_sheet("History", to_delete)
+                    st.success("Deleted!")
+                    st.rerun()
             
-            # Chart
             st.caption("History Trend")
             df_hist['Date'] = pd.to_datetime(df_hist['Date'])
             df_hist = df_hist.sort_values('Date')
             fig_hist = px.line(df_hist, x='Date', y=['Net_Income', 'Balance'], markers=True, height=250)
             st.plotly_chart(fig_hist, use_container_width=True)
         else:
-            st.info("No history found in Google Sheet.")
+            st.info("No history found in Cloud.")
 
     # AI Section
     st.markdown("###")
@@ -325,7 +312,3 @@ with col_right:
                         response = client.models.generate_content(model=selected_model, contents=prompt)
                         st.markdown(f"""<div style="background-color: #1e293b; padding: 20px; border-radius: 10px; color: #e2e8f0; border-left: 5px solid #8b5cf6;">{response.text}</div>""", unsafe_allow_html=True)
                 except Exception as e: st.error(f"Error: {e}")
-
-# Auto-save Draft state to Cloud periodically (or via manual button to stay fast)
-# We avoid auto-saving on every keystroke to prevent API rate limits, relying on the 'Save' button or 'Force Save' sidebar button.
-
