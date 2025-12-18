@@ -18,8 +18,8 @@ st.markdown("""
     .stButton>button { width: 100%; border-radius: 8px; font-weight: bold; }
     [data-testid="stDataEditor"] { border: 1px solid #e0e0e0; border-radius: 10px; }
     /* Red styling for delete buttons */
-    .delete-btn > button { background-color: #fee2e2; color: #ef4444; border: 1px solid #ef4444; }
-    .delete-btn > button:hover { background-color: #fca5a5; color: white; }
+    .delete-btn { border: 1px solid #ef4444; color: #ef4444; }
+    .delete-btn:hover { background-color: #fee2e2; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -113,14 +113,12 @@ with st.sidebar:
             except Exception as e:
                 st.error(f"Connection Error: {e}")
     
-    # --- NEW: RESET FORM BUTTON ---
     st.divider()
     st.markdown("### ⚠️ Danger Zone")
     if st.button("🔄 Reset Current Form", help="Clears all inputs to zero and wipes auto-save memory."):
         # 1. Clear Session State Logic
         st.session_state.expenses = []
         st.session_state.deductions_list = []
-        # We can't clear widgets directly, but deleting the State File and Rerunning works
         if os.path.exists(STATE_FILE):
             os.remove(STATE_FILE)
         
@@ -130,7 +128,7 @@ with st.sidebar:
         st.session_state.variable_income = 0.0
         st.session_state.current_savings = 0.0
         
-        st.rerun() # Refresh app to apply clean slate
+        st.rerun() 
 
 # --- MAIN LAYOUT ---
 col_left, col_right = st.columns([1, 1.5], gap="large")
@@ -143,7 +141,6 @@ with col_left:
         months = ["January", "February", "March", "April", "May", "June", 
                   "July", "August", "September", "October", "November", "December"]
         
-        # Load defaults safely
         if saved_state and 'month_select' in saved_state:
             try: def_month_idx = months.index(saved_state['month_select'])
             except: def_month_idx = datetime.now().month - 1
@@ -157,15 +154,12 @@ with col_left:
         st.divider()
         
         # INCOME
-        # If reset happened, these will default to 0.0 from the check above
         def_savings = saved_state.get('current_savings', 10000.0) if saved_state else 10000.0
         def_salary = saved_state.get('basic_salary', 6000.0) if saved_state else 6000.0
         def_allowance = saved_state.get('allowances', 500.0) if saved_state else 500.0
         def_var = saved_state.get('variable_income', 0.0) if saved_state else 0.0
 
-        # Note: If file was deleted by Reset, load_state returns None, so we default to 0 if desired
         if not saved_state and not os.path.exists(STATE_FILE): 
-             # Post-reset state
              def_savings = 0.0; def_salary = 0.0; def_allowance = 0.0; def_var = 0.0
 
         current_savings = st.number_input("Current Savings", value=def_savings, step=1000.0, key="current_savings")
@@ -236,7 +230,7 @@ with col_right:
         fig2.update_layout(height=250, margin=dict(t=0, b=0, l=0, r=0))
         st.plotly_chart(fig2, use_container_width=True)
 
-    # --- DATA MANAGEMENT (UPDATED: CLEAR BUTTONS) ---
+    # --- DATA MANAGEMENT (UPGRADED V6.3) ---
     with st.container(border=True):
         st.subheader("💾 Data Management")
         db_col1, db_col2 = st.columns(2)
@@ -248,54 +242,57 @@ with col_right:
             "Net_Income": net, "Total_Expenses": total_exp, "Balance": balance, "EPF_Savings": epf_amount
         }
         
-        # SAVE BUTTON
+        # 1. SAVE BUTTON
         with db_col1:
             if st.button(f"Save {selected_month} {selected_year}"):
                 new_row = pd.DataFrame([current_data])
                 if not os.path.exists(HISTORY_FILE):
                     new_row.to_csv(HISTORY_FILE, index=False)
                 else:
-                    # Append logic: check if exists first? For now, simple append
                     new_row.to_csv(HISTORY_FILE, mode='a', header=False, index=False)
                 st.success("Saved!")
 
-        # DOWNLOAD BUTTON
+        # 2. DOWNLOAD BUTTON
         with db_col2:
             if os.path.exists(HISTORY_FILE):
                 with open(HISTORY_FILE, "rb") as f:
                     st.download_button("Download CSV", f, HISTORY_FILE, "text/csv")
         
-        # --- NEW: CLEAR SPECIFIC MONTH ---
-        st.divider()
-        if st.button(f"🗑️ Delete {selected_month} {selected_year} Data Only"):
-            if os.path.exists(HISTORY_FILE):
-                df_hist = pd.read_csv(HISTORY_FILE)
-                # Filter OUT the selected month and year
-                # We convert columns to ensure matching types
-                df_hist['Year'] = df_hist['Year'].astype(int)
-                initial_len = len(df_hist)
-                
-                # Keep rows that DO NOT match current selection
-                df_clean = df_hist[~((df_hist['Month'] == selected_month) & (df_hist['Year'] == selected_year))]
-                
-                if len(df_clean) < initial_len:
-                    df_clean.to_csv(HISTORY_FILE, index=False)
-                    st.success(f"Deleted {selected_month} {selected_year} from history.")
-                    st.rerun()
-                else:
-                    st.warning("No record found for this month to delete.")
-            else:
-                st.warning("No database found.")
-
-        # HISTORICAL CHART
+        # 3. SURGICAL DELETE (MULTI-SELECT)
         st.divider()
         if os.path.exists(HISTORY_FILE):
-            history_df = pd.read_csv(HISTORY_FILE)
-            if not history_df.empty:
-                history_df['Date'] = pd.to_datetime(history_df['Date'])
-                history_df = history_df.sort_values('Date')
-                fig_hist = px.line(history_df, x='Date', y=['Net_Income', 'Balance'], markers=True, title="History Trend", height=250)
-                st.plotly_chart(fig_hist, use_container_width=True)
+            try:
+                # Read history to find unique Month-Year combinations
+                df_hist = pd.read_csv(HISTORY_FILE)
+                if not df_hist.empty:
+                    # Create a readable "Label" column (e.g. "December 2025")
+                    df_hist['Label'] = df_hist['Month'] + " " + df_hist['Year'].astype(str)
+                    
+                    # Get unique labels for the dropdown
+                    available_records = df_hist['Label'].unique().tolist()
+                    
+                    # The Multi-Select Box
+                    st.caption("Select months to remove from database:")
+                    to_delete = st.multiselect("Select records", available_records)
+                    
+                    if to_delete:
+                        if st.button(f"🗑️ Delete {len(to_delete)} Selected Record(s)"):
+                            # Filter out the rows that match the selected labels
+                            df_clean = df_hist[~df_hist['Label'].isin(to_delete)]
+                            
+                            # Drop the temporary 'Label' column before saving back
+                            df_clean = df_clean.drop(columns=['Label'])
+                            
+                            # Overwrite CSV
+                            df_clean.to_csv(HISTORY_FILE, index=False)
+                            st.success(f"Deleted: {', '.join(to_delete)}")
+                            st.rerun()
+                else:
+                    st.info("Database is empty.")
+            except Exception as e:
+                st.error(f"Error reading DB: {e}")
+        else:
+            st.info("No database found yet. Save a month to start!")
 
     # AI Section
     st.markdown("###")
