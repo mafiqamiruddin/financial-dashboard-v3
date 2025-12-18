@@ -328,8 +328,21 @@ with col_left:
     with st.container(border=True):
         st.subheader("🧾 Living Expenses")
         df_expenses_input = pd.DataFrame(st.session_state.expenses)
-        edited_expenses = st.data_editor(df_expenses_input, num_rows="dynamic", use_container_width=True, key="expenses_editor", column_config={"Category": st.column_config.TextColumn("Expense Category"), "Amount": st.column_config.NumberColumn("Amount (RM)", format="%.2f")})
+        edited_expenses = st.data_editor(
+            df_expenses_input, 
+            num_rows="dynamic", 
+            use_container_width=True, 
+            key="expenses_editor", 
+            column_config={
+                "Category": st.column_config.TextColumn("Expense Category"), 
+                "Amount": st.column_config.NumberColumn("Amount (RM)", format="%.2f")
+            }
+        )
         st.session_state.expenses = edited_expenses.to_dict('records')
+        
+        # --- NEW: Calculate and Display Total ---
+        total_living_expenses = edited_expenses['Amount'].sum() if not edited_expenses.empty else 0.0
+        st.markdown(f"#### Total Expenses: <span style='color:#e74c3c'>RM {total_living_expenses:.2f}</span>", unsafe_allow_html=True)
 
 with col_right:
     gross = basic_salary + allowances + variable_income
@@ -475,3 +488,4 @@ with col_right:
                         response = client.models.generate_content(model=selected_auditor_model, contents=prompt)
                         st.markdown(f"""<div style="background-color: #1e293b; padding: 20px; border-radius: 10px; color: #e2e8f0; border-left: 5px solid #8b5cf6;">{response.text}</div>""", unsafe_allow_html=True)
                 except Exception as e: st.error(f"Error: {e}")
+
