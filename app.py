@@ -276,18 +276,54 @@ with col_right:
     with st.container(border=True):
         t_col1, t_col2 = st.columns([3, 1])
         t_col1.subheader("📈 Wealth Projection")
+        
+        # 1. Configuration Controls
         duration_option = t_col2.selectbox("Projection", ["1 Year", "3 Years", "5 Years", "10 Years"], index=2)
+        inflation_rate = t_col2.number_input("Inflation (%)", value=3.0, step=0.5) / 100
+        
         duration_map = {"1 Year": 12, "3 Years": 36, "5 Years": 60, "10 Years": 120}
         months_to_project = duration_map[duration_option]
         
         future = []
         acc = current_savings
-        for m in range(months_to_project):
-            acc += balance
-            future.append({"Month": m+1, "Wealth": acc})
         
-        fig2 = px.area(pd.DataFrame(future), x="Month", y="Wealth", color_discrete_sequence=['#2ecc71'])
-        fig2.update_layout(height=250, margin=dict(t=0, b=0, l=0, r=0))
+        # 2. The Projection Loop
+        for m in range(months_to_project):
+            # Accumulate the nominal balance (Simple accumulation)
+            acc += balance 
+            
+            # Calculate Real Value (Discounting future value to present value)
+            # Formula: PV = FV / (1 + monthly_inflation)^months
+            monthly_inflation = inflation_rate / 12
+            real_value = acc / ((1 + monthly_inflation) ** (m + 1))
+            
+            future.append({
+                "Month": m + 1, 
+                "Nominal Wealth (Bank Amount)": acc,
+                "Real Purchasing Power (Today's Value)": real_value
+            })
+        
+        # 3. Plotting Both Lines
+        df_future = pd.DataFrame(future)
+        
+        # Melt the dataframe to make it easy for Plotly to draw two lines
+        df_melted = df_future.melt(id_vars=["Month"], var_name="Metric", value_name="Amount")
+        
+        fig2 = px.line(
+            df_melted, 
+            x="Month", 
+            y="Amount", 
+            color="Metric",
+            color_discrete_map={
+                "Nominal Wealth (Bank Amount)": "#2ecc71",       # Green (Optimistic)
+                "Real Purchasing Power (Today's Value)": "#e74c3c" # Red (Realistic)
+            }
+        )
+        
+        # Fill the area only for the Nominal line for style
+        fig2.update_traces(fill='tozeroy', selector=dict(name="Nominal Wealth (Bank Amount)"))
+        fig2.update_layout(height=300, margin=dict(t=10, b=0, l=0, r=0), legend=dict(orientation="h", y=1.1))
+        
         st.plotly_chart(fig2, use_container_width=True)
 
     # --- CLOUD DATABASE ---
@@ -350,5 +386,6 @@ with col_right:
                         response = client.models.generate_content(model=selected_model, contents=prompt)
                         st.markdown(f"""<div style="background-color: #1e293b; padding: 20px; border-radius: 10px; color: #e2e8f0; border-left: 5px solid #8b5cf6;">{response.text}</div>""", unsafe_allow_html=True)
                 except Exception as e: st.error(f"Error: {e}")
+
 
 
