@@ -206,7 +206,89 @@ with st.sidebar:
 
                     st.rerun() # Refresh page to show new data
             st.success("Draft Updated!")
+# --- NEW: AI AUTO-FILL SECTION ---
+    st.divider()
+    with st.expander("🤖 AI Auto-Fill (Magic)"):
+        st.caption("Describe a persona, and AI will fill the dashboard for you.")
+        user_persona = st.text_area("Scenario:", placeholder="e.g., Senior Lecturer in KL with 2 kids and a Honda City loan.", height=70)
+        
+        if st.button("✨ Fill Dashboard"):
+            if not api_key:
+                st.error("Please enter API Key first.")
+            else:
+                with st.spinner("AI is generating a realistic profile..."):
+                    try:
+                        client = genai.Client(api_key=api_key)
+                        
+                        prompt_structure = """
+                        You are a Data Entry API. 
+                        Based on this persona: "{persona}"
+                        Generate realistic monthly financial figures (in MYR) for a Malaysian context.
+                        
+                        Return ONLY a valid JSON object with this EXACT structure (no markdown, no extra text):
+                        {{
+                            "basic_salary": float,
+                            "allowances": float,
+                            "variable_income": float,
+                            "current_savings": float,
+                            "epf_rate": int (between 0 and 20),
+                            "expenses": [
+                                {{"Category": "Housing", "Amount": float}},
+                                {{"Category": "Car/Transport", "Amount": float}},
+                                {{"Category": "Food", "Amount": float}},
+                                {{"Category": "Utilities", "Amount": float}},
+                                {{"Category": "Loans/Debts", "Amount": float}},
+                                {{"Category": "Savings/Investments", "Amount": float}}
+                            ],
+                            "deductions": [
+                                {{"Category": "SOCSO", "Amount": float}},
+                                {{"Category": "EIS", "Amount": float}},
+                                {{"Category": "PCB (Tax)", "Amount": float}}
+                            ]
+                        }}
+                        """
+                        final_prompt = prompt_structure.format(persona=user_persona if user_persona else "Average Malaysian Executive")
+                        
+                        response = client.models.generate_content(
+                            model="gemini-2.0-flash-exp", 
+                            contents=final_prompt
+                        )
+                        
+                        raw_text = response.text.replace("```json", "").replace("```", "").strip()
+                        ai_data = json.loads(raw_text)
+                        
+                        # Inject into Session State
+                        st.session_state["basic_salary"] = float(ai_data.get("basic_salary", 0))
+                        st.session_state["allowances"] = float(ai_data.get("allowances", 0))
+                        st.session_state["variable_income"] = float(ai_data.get("variable_income", 0))
+                        st.session_state["current_savings"] = float(ai_data.get("current_savings", 0))
+                        st.session_state["epf_rate"] = int(ai_data.get("epf_rate", 11))
+                        
+                        st.session_state.expenses = ai_data.get("expenses", [])
+                        st.session_state.deductions_list = ai_data.get("deductions", [])
+                        
+                        st.session_state.loaded_salary = st.session_state["basic_salary"]
+                        st.session_state.loaded_allowances = st.session_state["allowances"]
+                        st.session_state.loaded_var = st.session_state["variable_income"]
+                        st.session_state.loaded_savings = st.session_state["current_savings"]
+                        st.session_state.loaded_epf = st.session_state["epf_rate"]
+                        
+                        st.success("Dashboard populated!")
+                        st.rerun()
+                        
+                    except Exception as e:
+                        st.error(f"AI Generation Failed: {e}")
 
+    st.divider()
+    if st.button("🛠️ Check Available Models"):
+        if not api_key: st.error("API Key required.")
+        else:
+            try:
+                client = genai.Client(api_key=api_key)
+                models = client.models.list()
+                fetched = [m.name.replace("models/", "") for m in models if "gemini" in m.name and "embedding" not in m.name]
+                if fetched: st.session_state.available_models = sorted(fetched); st.success(f"Found {len(fetched)} models!")
+            except Exception as e: st.error(f"Error: {e}")
     st.divider()
     if st.button("🛠️ Check Available Models"):
         if not api_key: st.error("API Key required.")
@@ -422,6 +504,7 @@ with col_right:
                         response = client.models.generate_content(model=selected_model, contents=prompt)
                         st.markdown(f"""<div style="background-color: #1e293b; padding: 20px; border-radius: 10px; color: #e2e8f0; border-left: 5px solid #8b5cf6;">{response.text}</div>""", unsafe_allow_html=True)
                 except Exception as e: st.error(f"Error: {e}")
+
 
 
 
