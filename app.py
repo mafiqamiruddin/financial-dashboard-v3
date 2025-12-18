@@ -57,10 +57,14 @@ def save_row_to_sheet(worksheet_name, row_data_dict):
         except:
             # Create if missing
             ws = sheet.add_worksheet(title=worksheet_name, rows=100, cols=20)
-            # Add headers
+        
+        # KEY FIX: Check if the sheet is actually empty
+        existing_data = ws.get_all_values()
+        if not existing_data:
+            # If empty, write the HEADERS first
             ws.append_row(list(row_data_dict.keys()))
             
-        # Append data
+        # Then append the DATA
         ws.append_row(list(row_data_dict.values()))
 
 def delete_rows_from_sheet(worksheet_name, month_year_list):
@@ -324,3 +328,4 @@ with col_right:
 
 # Auto-save Draft state to Cloud periodically (or via manual button to stay fast)
 # We avoid auto-saving on every keystroke to prevent API rate limits, relying on the 'Save' button or 'Force Save' sidebar button.
+
