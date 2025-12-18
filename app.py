@@ -181,4 +181,103 @@ with col_right:
         duration_option = t_col2.selectbox("Projection", ["1 Year", "3 Years", "5 Years", "10 Years"], index=2)
         
         duration_map = {"1 Year": 12, "3 Years": 36, "5 Years": 60, "10 Years": 120}
-        months
+        months_to_project = duration_map[duration_option]
+        
+        future = []
+        acc = current_savings
+        for m in range(months_to_project):
+            acc += balance
+            future.append({"Month": m+1, "Wealth": acc})
+        
+        fig2 = px.area(pd.DataFrame(future), x="Month", y="Wealth", color_discrete_sequence=['#2ecc71'])
+        fig2.update_layout(height=250, margin=dict(t=0, b=0, l=0, r=0))
+        st.plotly_chart(fig2, use_container_width=True)
+
+    # DATA MANAGEMENT (UPDATED: Uses Selected Date)
+    with st.container(border=True):
+        st.subheader("💾 Data Management")
+        db_col1, db_col2 = st.columns(2)
+        
+        # Logic to create a proper Date object from Month/Year selection
+        month_map = {name: i+1 for i, name in enumerate(months)}
+        month_num = month_map[selected_month]
+        # Create a date string for sorting (e.g. 2025-10-01)
+        date_obj = datetime(selected_year, month_num, 1)
+        date_str = date_obj.strftime("%Y-%m-%d")
+        
+        current_data = {
+            "Date": date_str,  # SAVES YOUR SELECTED DATE
+            "Month": selected_month,
+            "Year": selected_year,
+            "Net_Income": net,
+            "Total_Expenses": total_exp,
+            "Balance": balance,
+            "EPF_Savings": epf_amount
+        }
+        
+        with db_col1:
+            if st.button(f"Save {selected_month} {selected_year}"):
+                file_path = "financial_history.csv"
+                new_row = pd.DataFrame([current_data])
+                
+                if not os.path.exists(file_path):
+                    new_row.to_csv(file_path, index=False)
+                    st.success(f"Created DB & Saved {selected_month}!")
+                else:
+                    # Append logic
+                    new_row.to_csv(file_path, mode='a', header=False, index=False)
+                    st.success(f"Saved {selected_month} {selected_year} to history!")
+        
+        with db_col2:
+            if os.path.exists("financial_history.csv"):
+                with open("financial_history.csv", "rb") as f:
+                    st.download_button("Download CSV", f, "financial_history.csv", "text/csv")
+
+    # AI AUDITOR
+    st.markdown("###")
+    with st.container():
+        st.markdown("""
+        <div style="background-color: #0f172a; padding: 20px; border-radius: 10px; color: white; border: 1px solid #334155; margin-bottom: 10px;">
+            <h3 style="margin:0;">✨ AI Financial Auditor</h3>
+            <p style="color: #94a3b8; font-size: 0.9em; margin:0;">Select a model and generate your audit.</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        selected_model = st.selectbox("Select AI Model", st.session_state.available_models)
+        
+        if st.button("🚀 Generate Analysis", type="primary"):
+            if not api_key:
+                st.warning("API Key required.")
+            else:
+                try:
+                    client = genai.Client(api_key=api_key)
+                    deduction_txt = "\n".join([f"- {x['Category']}: RM {x['Amount']}" for x in st.session_state.deductions_list])
+                    exp_txt = "\n".join([f"- {x['Category']}: RM {x['Amount']}" for x in st.session_state.expenses])
+                    
+                    prompt = f"""
+                    Role: Expert Malaysian Financial Planner.
+                    Context: Analysis for {selected_month} {selected_year}.
+                    Stats: Net Income: RM {net:.2f}, Expenses: RM {total_exp:.2f}, Balance: RM {balance:.2f}
+                    
+                    Statutory Deductions:
+                    - EPF: RM {epf_amount:.2f}
+                    {deduction_txt}
+                    
+                    Living Expenses:
+                    {exp_txt}
+                    
+                    Provide:
+                    1. Leakage Check (KL Cost of Living context)
+                    2. Tax Relief Suggestions (Malaysian Context)
+                    3. Researcher/Engineering Analogy for financial health.
+                    """
+                    
+                    with st.spinner(f"Asking {selected_model}..."):
+                        response = client.models.generate_content(model=selected_model, contents=prompt)
+                        st.markdown(f"""
+                        <div style="background-color: #1e293b; padding: 20px; border-radius: 10px; color: #e2e8f0; border-left: 5px solid #8b5cf6;">
+                            {response.text}
+                        </div>
+                        """, unsafe_allow_html=True)
+                except Exception as e:
+                    st.error(f"Error: {e}")
