@@ -153,7 +153,7 @@ if 'data_loaded' not in st.session_state:
 if 'available_models' not in st.session_state:
     st.session_state.available_models = ["gemini-1.5-flash", "gemini-2.0-flash-exp"]
 
-# --- SIDEBAR: SYNC CENTER ---
+# --- SIDEBAR: SYNC & AI CENTER ---
 with st.sidebar:
     st.header("⚙️ Configuration")
     api_key = st.secrets.get("GEMINI_API_KEY", None)
@@ -164,7 +164,7 @@ with st.sidebar:
     else: st.error("Missing Google Cloud Credentials.")
 
     st.divider()
-    # NEW: CLOUD SYNC CONTROLS
+    # CLOUD SYNC CONTROLS
     st.markdown("### ☁️ Cross-Device Sync")
     st.info("Switching devices? Use these buttons to sync your draft inputs.")
     
@@ -180,22 +180,20 @@ with st.sidebar:
             with st.spinner("Downloading..."):
                 cloud_state = load_cloud_state()
                 if cloud_state:
-                    # 1. Update the Widget Keys directly (This forces the UI to change)
+                    # KEY FIX: Explicitly update session keys
                     st.session_state["basic_salary"] = float(cloud_state.get('basic_salary', 0.0))
                     st.session_state["allowances"] = float(cloud_state.get('allowances', 0.0))
                     st.session_state["variable_income"] = float(cloud_state.get('variable_income', 0.0))
                     st.session_state["current_savings"] = float(cloud_state.get('current_savings', 0.0))
                     st.session_state["epf_rate"] = int(cloud_state.get('epf_rate', 11))
                     
-                    # 2. Update Month/Year Keys
                     st.session_state["month_select"] = cloud_state.get('month_select', "December")
                     st.session_state["year_input"] = int(cloud_state.get('year_input', datetime.now().year))
                     
-                    # 3. Update Lists (Expenses/Deductions)
                     st.session_state.expenses = json.loads(cloud_state.get('expenses', '[]'))
                     st.session_state.deductions_list = json.loads(cloud_state.get('deductions', '[]'))
                     
-                    # 4. Update the "loaded_" helpers too (to keep them in sync for safety)
+                    # Update helpers
                     st.session_state.loaded_salary = st.session_state["basic_salary"]
                     st.session_state.loaded_allowances = st.session_state["allowances"]
                     st.session_state.loaded_var = st.session_state["variable_income"]
@@ -204,31 +202,10 @@ with st.sidebar:
                     st.session_state.loaded_month = st.session_state["month_select"]
                     st.session_state.loaded_year = st.session_state["year_input"]
 
-                    st.rerun() # Refresh page to show new data
+                    st.rerun() 
             st.success("Draft Updated!")
 
-    st.divider()
-    if st.button("🛠️ Check Available Models"):
-        if not api_key: st.error("API Key required.")
-        else:
-            try:
-                client = genai.Client(api_key=api_key)
-                models = client.models.list()
-                fetched = [m.name.replace("models/", "") for m in models if "gemini" in m.name and "embedding" not in m.name]
-                if fetched: st.session_state.available_models = sorted(fetched); st.success(f"Found {len(fetched)} models!")
-            except Exception as e: st.error(f"Error: {e}")
-    st.divider()
-    if st.button("🛠️ Check Available Models"):
-        if not api_key: st.error("API Key required.")
-        else:
-            try:
-                client = genai.Client(api_key=api_key)
-                models = client.models.list()
-                fetched = [m.name.replace("models/", "") for m in models if "gemini" in m.name and "embedding" not in m.name]
-                if fetched: st.session_state.available_models = sorted(fetched); st.success(f"Found {len(fetched)} models!")
-            except Exception as e: st.error(f"Error: {e}")
-
-# --- NEW: AI AUTO-FILL SECTION ---
+    # --- NEW: AI AUTO-FILL SECTION ---
     st.divider()
     with st.expander("🤖 AI Auto-Fill (Magic)"):
         st.caption("Describe a persona, and AI will fill the dashboard for you.")
@@ -242,8 +219,6 @@ with st.sidebar:
                     try:
                         client = genai.Client(api_key=api_key)
                         
-                        # 1. The Strict Prompt
-                        # We force the AI to return ONLY JSON matching your exact variable names.
                         prompt_structure = """
                         You are a Data Entry API. 
                         Based on this persona: "{persona}"
@@ -273,18 +248,15 @@ with st.sidebar:
                         """
                         final_prompt = prompt_structure.format(persona=user_persona if user_persona else "Average Malaysian Executive")
                         
-                        # 2. Call AI
                         response = client.models.generate_content(
-                            model="gemini-2.0-flash-exp", # Use a fast model
+                            model="gemini-2.0-flash-exp", 
                             contents=final_prompt
                         )
                         
-                        # 3. Clean and Parse JSON
-                        # Sometimes AI adds ```json ... ``` wrappers, we need to clean them.
                         raw_text = response.text.replace("```json", "").replace("```", "").strip()
                         ai_data = json.loads(raw_text)
                         
-                        # 4. Inject into Session State (The "Sticky Key" Fix)
+                        # Inject into Session State
                         st.session_state["basic_salary"] = float(ai_data.get("basic_salary", 0))
                         st.session_state["allowances"] = float(ai_data.get("allowances", 0))
                         st.session_state["variable_income"] = float(ai_data.get("variable_income", 0))
@@ -294,7 +266,6 @@ with st.sidebar:
                         st.session_state.expenses = ai_data.get("expenses", [])
                         st.session_state.deductions_list = ai_data.get("deductions", [])
                         
-                        # Update helpers to prevent reversion
                         st.session_state.loaded_salary = st.session_state["basic_salary"]
                         st.session_state.loaded_allowances = st.session_state["allowances"]
                         st.session_state.loaded_var = st.session_state["variable_income"]
@@ -306,6 +277,17 @@ with st.sidebar:
                         
                     except Exception as e:
                         st.error(f"AI Generation Failed: {e}")
+
+    st.divider()
+    if st.button("🛠️ Check Available Models"):
+        if not api_key: st.error("API Key required.")
+        else:
+            try:
+                client = genai.Client(api_key=api_key)
+                models = client.models.list()
+                fetched = [m.name.replace("models/", "") for m in models if "gemini" in m.name and "embedding" not in m.name]
+                if fetched: st.session_state.available_models = sorted(fetched); st.success(f"Found {len(fetched)} models!")
+            except Exception as e: st.error(f"Error: {e}")
 
 # --- MAIN LAYOUT ---
 col_left, col_right = st.columns([1, 1.5], gap="large")
@@ -362,11 +344,11 @@ with col_right:
             fig.update_layout(height=300, margin=dict(t=30, b=0, l=0, r=0))
             st.plotly_chart(fig, use_container_width=True)
 
+    # --- DYNAMIC WEALTH PROJECTION ---
     with st.container(border=True):
         t_col1, t_col2 = st.columns([3, 1])
         t_col1.subheader("📈 Wealth Projection")
         
-        # --- INPUT SECTION (RIGHT COLUMN) ---
         duration_option = t_col2.selectbox("Projection", ["1 Year", "3 Years", "5 Years", "10 Years"], index=1)
         duration_map = {"1 Year": 12, "3 Years": 36, "5 Years": 60, "10 Years": 120}
         months_to_project = duration_map[duration_option]
@@ -375,12 +357,9 @@ with col_right:
         t_col2.markdown("**Inflation Scenarios**")
         t_col2.caption("Adjust rates for each year:")
         
-        # 1. Create a default structure for the rates
-        # We use session state to remember your manual edits if you switch durations
         default_rates = [{"Year": i+1, "Inflation (%)": 3.0} for i in range(years_count)]
         df_rates_input = pd.DataFrame(default_rates)
         
-        # 2. The Data Editor (Scalable UI for 1, 3, or 10 years)
         edited_rates = t_col2.data_editor(
             df_rates_input, 
             hide_index=True, 
@@ -391,35 +370,21 @@ with col_right:
             }
         )
         
-        # Convert table back to a simple list of rates for calculation
-        # e.g., [0.03, 0.04, 0.025]
         yearly_rates_list = [x / 100 for x in edited_rates["Inflation (%)"].tolist()]
 
-        # --- CALCULATION SECTION ---
         future = []
         acc = current_savings
-        
-        # We need a running "Deflator" to calculate Real Value accurately across changing rates
         cumulative_deflator = 1.0 
         
         for m in range(months_to_project):
-            # 1. Determine which year we are in (Year 0, Year 1, etc.)
             current_year_idx = m // 12
-            
-            # 2. Get the specific rate for that year
-            # Safety check: if logic fails, default to 3%
             if current_year_idx < len(yearly_rates_list):
                 current_annual_rate = yearly_rates_list[current_year_idx]
             else:
                 current_annual_rate = 0.03
                 
             monthly_inflation = current_annual_rate / 12
-            
-            # 3. Accumulate Nominal Wealth
             acc += balance
-            
-            # 4. Calculate Real Wealth (Variable Discounting)
-            # We compound the deflator month by month
             cumulative_deflator *= (1 + monthly_inflation)
             real_value = acc / cumulative_deflator
             
@@ -429,7 +394,6 @@ with col_right:
                 "Real Purchasing Power": real_value
             })
         
-        # --- PLOTTING SECTION (LEFT COLUMN) ---
         df_future = pd.DataFrame(future)
         df_melted = df_future.melt(id_vars=["Month"], var_name="Metric", value_name="Amount")
         
@@ -439,16 +403,12 @@ with col_right:
             y="Amount", 
             color="Metric",
             color_discrete_map={
-                "Nominal Wealth": "#2ecc71",       # Green
-                "Real Purchasing Power": "#e74c3c" # Red
+                "Nominal Wealth": "#2ecc71", 
+                "Real Purchasing Power": "#e74c3c"
             }
         )
         fig2.update_traces(fill='tozeroy', selector=dict(name="Nominal Wealth"))
-        fig2.update_layout(
-            height=300, 
-            margin=dict(t=10, b=0, l=0, r=0), 
-            legend=dict(orientation="h", y=1.1, title=None)
-        )
+        fig2.update_layout(height=300, margin=dict(t=10, b=0, l=0, r=0), legend=dict(orientation="h", y=1.1, title=None))
         t_col1.plotly_chart(fig2, use_container_width=True)
 
     # --- CLOUD DATABASE ---
@@ -489,7 +449,7 @@ with col_right:
         else:
             st.info("No history found in Cloud.")
 
-    # AI Section
+    # --- AI FINANCIAL AUDITOR (PRESERVED) ---
     st.markdown("###")
     with st.container():
         st.markdown("""<div style="background-color: #0f172a; padding: 20px; border-radius: 10px; color: white; border: 1px solid #334155; margin-bottom: 10px;">
@@ -511,8 +471,3 @@ with col_right:
                         response = client.models.generate_content(model=selected_model, contents=prompt)
                         st.markdown(f"""<div style="background-color: #1e293b; padding: 20px; border-radius: 10px; color: #e2e8f0; border-left: 5px solid #8b5cf6;">{response.text}</div>""", unsafe_allow_html=True)
                 except Exception as e: st.error(f"Error: {e}")
-
-
-
-
-
