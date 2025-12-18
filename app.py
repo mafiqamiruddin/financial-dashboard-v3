@@ -25,7 +25,6 @@ st.markdown("""
 # --- GOOGLE SHEETS FUNCTIONS ---
 def get_google_sheet_client():
     try:
-        # Load credentials from Streamlit Secrets
         if "GCP_CREDENTIALS" in st.secrets:
             creds_json = json.loads(st.secrets["GCP_CREDENTIALS"])
             scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
@@ -57,7 +56,6 @@ def save_row_to_sheet(worksheet_name, row_data_dict):
         except:
             ws = sheet.add_worksheet(title=worksheet_name, rows=100, cols=20)
             
-        # FIX: Check if empty, if so, add headers first
         existing_data = ws.get_all_values()
         if not existing_data:
             ws.append_row(list(row_data_dict.keys()))
@@ -79,8 +77,9 @@ def delete_rows_from_sheet(worksheet_name, month_year_list):
         ws.clear()
         ws.update([df_clean.columns.values.tolist()] + df_clean.values.tolist())
 
-# --- CLOUD STATE (AUTO-SAVE) ---
+# --- CLOUD SYNC FUNCTIONS ---
 def save_cloud_state():
+    """Push current screen inputs to Google Sheets 'State' tab"""
     state_data = {
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "expenses": json.dumps(st.session_state.get('expenses', [])),
@@ -103,6 +102,7 @@ def save_cloud_state():
         ws.append_row(list(state_data.values()))
 
 def load_cloud_state():
+    """Pull data from Google Sheets 'State' tab"""
     client = get_google_sheet_client()
     if client:
         try:
@@ -153,7 +153,7 @@ if 'data_loaded' not in st.session_state:
 if 'available_models' not in st.session_state:
     st.session_state.available_models = ["gemini-1.5-flash", "gemini-2.0-flash-exp"]
 
-# --- SIDEBAR ---
+# --- SIDEBAR: SYNC CENTER ---
 with st.sidebar:
     st.header("⚙️ Configuration")
     api_key = st.secrets.get("GEMINI_API_KEY", None)
@@ -162,6 +162,36 @@ with st.sidebar:
     
     if "GCP_CREDENTIALS" in st.secrets: st.success("Google Sheets Connected! ☁️")
     else: st.error("Missing Google Cloud Credentials.")
+
+    st.divider()
+    # NEW: CLOUD SYNC CONTROLS
+    st.markdown("### ☁️ Cross-Device Sync")
+    st.info("Switching devices? Use these buttons to sync your draft inputs.")
+    
+    col_sync1, col_sync2 = st.columns(2)
+    with col_sync1:
+        if st.button("⬆️ Upload Draft"):
+            with st.spinner("Syncing to Cloud..."):
+                save_cloud_state()
+            st.success("Draft Uploaded!")
+            
+    with col_sync2:
+        if st.button("⬇️ Pull Draft"):
+            with st.spinner("Downloading..."):
+                cloud_state = load_cloud_state()
+                if cloud_state:
+                    # Update Session State
+                    st.session_state.expenses = json.loads(cloud_state.get('expenses', '[]'))
+                    st.session_state.deductions_list = json.loads(cloud_state.get('deductions', '[]'))
+                    st.session_state.loaded_salary = float(cloud_state.get('basic_salary'))
+                    st.session_state.loaded_allowances = float(cloud_state.get('allowances'))
+                    st.session_state.loaded_var = float(cloud_state.get('variable_income'))
+                    st.session_state.loaded_savings = float(cloud_state.get('current_savings'))
+                    st.session_state.loaded_epf = int(cloud_state.get('epf_rate'))
+                    st.session_state.loaded_month = cloud_state.get('month_select')
+                    st.session_state.loaded_year = int(cloud_state.get('year_input'))
+                    st.rerun() # Refresh page to show new data
+            st.success("Draft Updated!")
 
     st.divider()
     if st.button("🛠️ Check Available Models"):
@@ -173,11 +203,6 @@ with st.sidebar:
                 fetched = [m.name.replace("models/", "") for m in models if "gemini" in m.name and "embedding" not in m.name]
                 if fetched: st.session_state.available_models = sorted(fetched); st.success(f"Found {len(fetched)} models!")
             except Exception as e: st.error(f"Error: {e}")
-            
-    st.divider()
-    if st.button("💾 Force Save Current State"):
-        save_cloud_state()
-        st.success("Draft saved to Cloud!")
 
 # --- MAIN LAYOUT ---
 col_left, col_right = st.columns([1, 1.5], gap="large")
@@ -234,7 +259,6 @@ with col_right:
             fig.update_layout(height=300, margin=dict(t=30, b=0, l=0, r=0))
             st.plotly_chart(fig, use_container_width=True)
 
-    # --- RESTORED: WEALTH TRAJECTORY ---
     with st.container(border=True):
         t_col1, t_col2 = st.columns([3, 1])
         t_col1.subheader("📈 Wealth Projection")
@@ -252,7 +276,7 @@ with col_right:
         fig2.update_layout(height=250, margin=dict(t=0, b=0, l=0, r=0))
         st.plotly_chart(fig2, use_container_width=True)
 
-    # --- GOOGLE SHEETS MANAGEMENT ---
+    # --- CLOUD DATABASE ---
     with st.container(border=True):
         st.subheader("☁️ Cloud Database")
         db_col1, db_col2 = st.columns(2)
@@ -264,7 +288,7 @@ with col_right:
         }
         
         with db_col1:
-            if st.button(f"Save {selected_month} {selected_year}"):
+            if st.button(f"Save {selected_month} {selected_year} History"):
                 with st.spinner("Saving..."):
                     save_row_to_sheet("History", current_data)
                     save_cloud_state()
