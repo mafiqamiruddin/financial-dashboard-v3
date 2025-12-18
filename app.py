@@ -153,7 +153,7 @@ if 'data_loaded' not in st.session_state:
 if 'available_models' not in st.session_state:
     st.session_state.available_models = ["gemini-1.5-flash", "gemini-2.0-flash-exp"]
 
-# --- SIDEBAR: SYNC & AI CENTER ---
+# --- SIDEBAR: SYNC CENTER ---
 with st.sidebar:
     st.header("⚙️ Configuration")
     api_key = st.secrets.get("GEMINI_API_KEY", None)
@@ -164,7 +164,7 @@ with st.sidebar:
     else: st.error("Missing Google Cloud Credentials.")
 
     st.divider()
-    # CLOUD SYNC CONTROLS
+    # NEW: CLOUD SYNC CONTROLS
     st.markdown("### ☁️ Cross-Device Sync")
     st.info("Switching devices? Use these buttons to sync your draft inputs.")
     
@@ -180,20 +180,22 @@ with st.sidebar:
             with st.spinner("Downloading..."):
                 cloud_state = load_cloud_state()
                 if cloud_state:
-                    # KEY FIX: Explicitly update session keys
+                    # 1. Update the Widget Keys directly (This forces the UI to change)
                     st.session_state["basic_salary"] = float(cloud_state.get('basic_salary', 0.0))
                     st.session_state["allowances"] = float(cloud_state.get('allowances', 0.0))
                     st.session_state["variable_income"] = float(cloud_state.get('variable_income', 0.0))
                     st.session_state["current_savings"] = float(cloud_state.get('current_savings', 0.0))
                     st.session_state["epf_rate"] = int(cloud_state.get('epf_rate', 11))
                     
+                    # 2. Update Month/Year Keys
                     st.session_state["month_select"] = cloud_state.get('month_select', "December")
                     st.session_state["year_input"] = int(cloud_state.get('year_input', datetime.now().year))
                     
+                    # 3. Update Lists (Expenses/Deductions)
                     st.session_state.expenses = json.loads(cloud_state.get('expenses', '[]'))
                     st.session_state.deductions_list = json.loads(cloud_state.get('deductions', '[]'))
                     
-                    # Update helpers
+                    # 4. Update the "loaded_" helpers too (to keep them in sync for safety)
                     st.session_state.loaded_salary = st.session_state["basic_salary"]
                     st.session_state.loaded_allowances = st.session_state["allowances"]
                     st.session_state.loaded_var = st.session_state["variable_income"]
@@ -202,81 +204,8 @@ with st.sidebar:
                     st.session_state.loaded_month = st.session_state["month_select"]
                     st.session_state.loaded_year = st.session_state["year_input"]
 
-                    st.rerun() 
+                    st.rerun() # Refresh page to show new data
             st.success("Draft Updated!")
-
-    # --- NEW: AI AUTO-FILL SECTION ---
-    st.divider()
-    with st.expander("🤖 AI Auto-Fill (Magic)"):
-        st.caption("Describe a persona, and AI will fill the dashboard for you.")
-        user_persona = st.text_area("Scenario:", placeholder="e.g., Senior Lecturer in KL with 2 kids and a Honda City loan.", height=70)
-        
-        if st.button("✨ Fill Dashboard"):
-            if not api_key:
-                st.error("Please enter API Key first.")
-            else:
-                with st.spinner("AI is generating a realistic profile..."):
-                    try:
-                        client = genai.Client(api_key=api_key)
-                        
-                        prompt_structure = """
-                        You are a Data Entry API. 
-                        Based on this persona: "{persona}"
-                        Generate realistic monthly financial figures (in MYR) for a Malaysian context.
-                        
-                        Return ONLY a valid JSON object with this EXACT structure (no markdown, no extra text):
-                        {{
-                            "basic_salary": float,
-                            "allowances": float,
-                            "variable_income": float,
-                            "current_savings": float,
-                            "epf_rate": int (between 0 and 20),
-                            "expenses": [
-                                {{"Category": "Housing", "Amount": float}},
-                                {{"Category": "Car/Transport", "Amount": float}},
-                                {{"Category": "Food", "Amount": float}},
-                                {{"Category": "Utilities", "Amount": float}},
-                                {{"Category": "Loans/Debts", "Amount": float}},
-                                {{"Category": "Savings/Investments", "Amount": float}}
-                            ],
-                            "deductions": [
-                                {{"Category": "SOCSO", "Amount": float}},
-                                {{"Category": "EIS", "Amount": float}},
-                                {{"Category": "PCB (Tax)", "Amount": float}}
-                            ]
-                        }}
-                        """
-                        final_prompt = prompt_structure.format(persona=user_persona if user_persona else "Average Malaysian Executive")
-                        
-                        response = client.models.generate_content(
-                            model="gemini-2.0-flash-exp", 
-                            contents=final_prompt
-                        )
-                        
-                        raw_text = response.text.replace("```json", "").replace("```", "").strip()
-                        ai_data = json.loads(raw_text)
-                        
-                        # Inject into Session State
-                        st.session_state["basic_salary"] = float(ai_data.get("basic_salary", 0))
-                        st.session_state["allowances"] = float(ai_data.get("allowances", 0))
-                        st.session_state["variable_income"] = float(ai_data.get("variable_income", 0))
-                        st.session_state["current_savings"] = float(ai_data.get("current_savings", 0))
-                        st.session_state["epf_rate"] = int(ai_data.get("epf_rate", 11))
-                        
-                        st.session_state.expenses = ai_data.get("expenses", [])
-                        st.session_state.deductions_list = ai_data.get("deductions", [])
-                        
-                        st.session_state.loaded_salary = st.session_state["basic_salary"]
-                        st.session_state.loaded_allowances = st.session_state["allowances"]
-                        st.session_state.loaded_var = st.session_state["variable_income"]
-                        st.session_state.loaded_savings = st.session_state["current_savings"]
-                        st.session_state.loaded_epf = st.session_state["epf_rate"]
-                        
-                        st.success("Dashboard populated!")
-                        st.rerun()
-                        
-                    except Exception as e:
-                        st.error(f"AI Generation Failed: {e}")
 
     st.divider()
     if st.button("🛠️ Check Available Models"):
@@ -317,4 +246,182 @@ with col_left:
         st.caption("Other Deductions")
         df_deductions_input = pd.DataFrame(st.session_state.deductions_list)
         edited_deductions = st.data_editor(df_deductions_input, num_rows="dynamic", use_container_width=True, key="deductions_editor", column_config={"Category": st.column_config.TextColumn("Deduction Name"), "Amount": st.column_config.NumberColumn("Amount (RM)", format="%.2f")})
-        st.session_state.deductions_list = edited_
+        st.session_state.deductions_list = edited_deductions.to_dict('records')
+        total_deductions = epf_amount + (edited_deductions['Amount'].sum() if not edited_deductions.empty else 0)
+        st.markdown(f"#### Total Deducted: <span style='color:#e74c3c'>RM {total_deductions:.2f}</span>", unsafe_allow_html=True)
+
+    with st.container(border=True):
+        st.subheader("🧾 Living Expenses")
+        df_expenses_input = pd.DataFrame(st.session_state.expenses)
+        edited_expenses = st.data_editor(df_expenses_input, num_rows="dynamic", use_container_width=True, key="expenses_editor", column_config={"Category": st.column_config.TextColumn("Expense Category"), "Amount": st.column_config.NumberColumn("Amount (RM)", format="%.2f")})
+        st.session_state.expenses = edited_expenses.to_dict('records')
+
+with col_right:
+    gross = basic_salary + allowances + variable_income
+    net = gross - total_deductions
+    total_exp = edited_expenses['Amount'].sum() if not edited_expenses.empty else 0
+    balance = net - total_exp
+
+    st.markdown(f"### Snapshot: {selected_month} {selected_year}")
+    c1, c2 = st.columns(2)
+    with c1: st.metric("Net Disposable", f"RM {net:.2f}")
+    with c2: st.metric("Monthly Surplus", f"RM {balance:.2f}", delta=f"{balance:.2f}")
+
+    with st.container(border=True):
+        if not edited_expenses.empty:
+            fig = px.pie(edited_expenses, values='Amount', names='Category', hole=0.5, title="Expense Breakdown")
+            fig.update_layout(height=300, margin=dict(t=30, b=0, l=0, r=0))
+            st.plotly_chart(fig, use_container_width=True)
+
+    with st.container(border=True):
+        t_col1, t_col2 = st.columns([3, 1])
+        t_col1.subheader("📈 Wealth Projection")
+        
+        # --- INPUT SECTION (RIGHT COLUMN) ---
+        duration_option = t_col2.selectbox("Projection", ["1 Year", "3 Years", "5 Years", "10 Years"], index=1)
+        duration_map = {"1 Year": 12, "3 Years": 36, "5 Years": 60, "10 Years": 120}
+        months_to_project = duration_map[duration_option]
+        years_count = months_to_project // 12
+
+        t_col2.markdown("**Inflation Scenarios**")
+        t_col2.caption("Adjust rates for each year:")
+        
+        # 1. Create a default structure for the rates
+        # We use session state to remember your manual edits if you switch durations
+        default_rates = [{"Year": i+1, "Inflation (%)": 3.0} for i in range(years_count)]
+        df_rates_input = pd.DataFrame(default_rates)
+        
+        # 2. The Data Editor (Scalable UI for 1, 3, or 10 years)
+        edited_rates = t_col2.data_editor(
+            df_rates_input, 
+            hide_index=True, 
+            use_container_width=True,
+            column_config={
+                "Year": st.column_config.NumberColumn(format="%d"),
+                "Inflation (%)": st.column_config.NumberColumn(format="%.1f%%")
+            }
+        )
+        
+        # Convert table back to a simple list of rates for calculation
+        # e.g., [0.03, 0.04, 0.025]
+        yearly_rates_list = [x / 100 for x in edited_rates["Inflation (%)"].tolist()]
+
+        # --- CALCULATION SECTION ---
+        future = []
+        acc = current_savings
+        
+        # We need a running "Deflator" to calculate Real Value accurately across changing rates
+        cumulative_deflator = 1.0 
+        
+        for m in range(months_to_project):
+            # 1. Determine which year we are in (Year 0, Year 1, etc.)
+            current_year_idx = m // 12
+            
+            # 2. Get the specific rate for that year
+            # Safety check: if logic fails, default to 3%
+            if current_year_idx < len(yearly_rates_list):
+                current_annual_rate = yearly_rates_list[current_year_idx]
+            else:
+                current_annual_rate = 0.03
+                
+            monthly_inflation = current_annual_rate / 12
+            
+            # 3. Accumulate Nominal Wealth
+            acc += balance
+            
+            # 4. Calculate Real Wealth (Variable Discounting)
+            # We compound the deflator month by month
+            cumulative_deflator *= (1 + monthly_inflation)
+            real_value = acc / cumulative_deflator
+            
+            future.append({
+                "Month": m+1, 
+                "Nominal Wealth": acc,
+                "Real Purchasing Power": real_value
+            })
+        
+        # --- PLOTTING SECTION (LEFT COLUMN) ---
+        df_future = pd.DataFrame(future)
+        df_melted = df_future.melt(id_vars=["Month"], var_name="Metric", value_name="Amount")
+        
+        fig2 = px.line(
+            df_melted, 
+            x="Month", 
+            y="Amount", 
+            color="Metric",
+            color_discrete_map={
+                "Nominal Wealth": "#2ecc71",       # Green
+                "Real Purchasing Power": "#e74c3c" # Red
+            }
+        )
+        fig2.update_traces(fill='tozeroy', selector=dict(name="Nominal Wealth"))
+        fig2.update_layout(
+            height=300, 
+            margin=dict(t=10, b=0, l=0, r=0), 
+            legend=dict(orientation="h", y=1.1, title=None)
+        )
+        t_col1.plotly_chart(fig2, use_container_width=True)
+
+    # --- CLOUD DATABASE ---
+    with st.container(border=True):
+        st.subheader("☁️ Cloud Database")
+        db_col1, db_col2 = st.columns(2)
+        
+        current_data = {
+            "Date": datetime(selected_year, months.index(selected_month)+1, 1).strftime("%Y-%m-%d"),
+            "Month": selected_month, "Year": selected_year,
+            "Net_Income": net, "Total_Expenses": total_exp, "Balance": balance, "EPF_Savings": epf_amount
+        }
+        
+        with db_col1:
+            if st.button(f"Save {selected_month} {selected_year} History"):
+                with st.spinner("Saving..."):
+                    save_row_to_sheet("History", current_data)
+                    save_cloud_state()
+                    st.success("Saved!")
+                    st.rerun()
+
+        st.divider()
+        df_hist = get_sheet_data("History")
+        if not df_hist.empty:
+            df_hist['Label'] = df_hist['Month'] + " " + df_hist['Year'].astype(str)
+            to_delete = st.multiselect("Select records to delete:", df_hist['Label'].unique())
+            if to_delete:
+                if st.button("🗑️ Delete Selected"):
+                    delete_rows_from_sheet("History", to_delete)
+                    st.success("Deleted!")
+                    st.rerun()
+            
+            st.caption("History Trend")
+            df_hist['Date'] = pd.to_datetime(df_hist['Date'])
+            df_hist = df_hist.sort_values('Date')
+            fig_hist = px.line(df_hist, x='Date', y=['Net_Income', 'Balance'], markers=True, height=250)
+            st.plotly_chart(fig_hist, use_container_width=True)
+        else:
+            st.info("No history found in Cloud.")
+
+    # AI Section
+    st.markdown("###")
+    with st.container():
+        st.markdown("""<div style="background-color: #0f172a; padding: 20px; border-radius: 10px; color: white; border: 1px solid #334155; margin-bottom: 10px;">
+            <h3 style="margin:0;">✨ AI Financial Auditor</h3></div>""", unsafe_allow_html=True)
+        selected_model = st.selectbox("Select AI Model", st.session_state.available_models)
+        if st.button("🚀 Generate Analysis", type="primary"):
+            if not api_key: st.warning("API Key required.")
+            else:
+                try:
+                    client = genai.Client(api_key=api_key)
+                    deduction_txt = "\n".join([f"- {x['Category']}: RM {x['Amount']}" for x in st.session_state.deductions_list])
+                    exp_txt = "\n".join([f"- {x['Category']}: RM {x['Amount']}" for x in st.session_state.expenses])
+                    prompt = f"""Role: Expert Malaysian Financial Planner. Context: {selected_month} {selected_year}.
+                    Stats: Net: RM {net:.2f}, Exp: RM {total_exp:.2f}, Bal: RM {balance:.2f}.
+                    Deductions: EPF: RM {epf_amount:.2f}\n{deduction_txt}
+                    Expenses: {exp_txt}
+                    Provide: 1. Leakage Check 2. Tax Reliefs 3. Researcher Analogy."""
+                    with st.spinner(f"Asking {selected_model}..."):
+                        response = client.models.generate_content(model=selected_model, contents=prompt)
+                        st.markdown(f"""<div style="background-color: #1e293b; padding: 20px; border-radius: 10px; color: #e2e8f0; border-left: 5px solid #8b5cf6;">{response.text}</div>""", unsafe_allow_html=True)
+                except Exception as e: st.error(f"Error: {e}")
+
+
+
