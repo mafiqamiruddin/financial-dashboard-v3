@@ -277,36 +277,71 @@ with col_right:
         t_col1, t_col2 = st.columns([3, 1])
         t_col1.subheader("📈 Wealth Projection")
         
-        # 1. Configuration Controls
-        duration_option = t_col2.selectbox("Projection", ["1 Year", "3 Years", "5 Years", "10 Years"], index=2)
-        inflation_rate = t_col2.number_input("Inflation (%)", value=3.0, step=0.5) / 100
-        
+        # --- INPUT SECTION (RIGHT COLUMN) ---
+        duration_option = t_col2.selectbox("Projection", ["1 Year", "3 Years", "5 Years", "10 Years"], index=1)
         duration_map = {"1 Year": 12, "3 Years": 36, "5 Years": 60, "10 Years": 120}
         months_to_project = duration_map[duration_option]
+        years_count = months_to_project // 12
+
+        t_col2.markdown("**Inflation Scenarios**")
+        t_col2.caption("Adjust rates for each year:")
         
+        # 1. Create a default structure for the rates
+        # We use session state to remember your manual edits if you switch durations
+        default_rates = [{"Year": i+1, "Inflation (%)": 3.0} for i in range(years_count)]
+        df_rates_input = pd.DataFrame(default_rates)
+        
+        # 2. The Data Editor (Scalable UI for 1, 3, or 10 years)
+        edited_rates = t_col2.data_editor(
+            df_rates_input, 
+            hide_index=True, 
+            use_container_width=True,
+            column_config={
+                "Year": st.column_config.NumberColumn(format="%d"),
+                "Inflation (%)": st.column_config.NumberColumn(format="%.1f%%")
+            }
+        )
+        
+        # Convert table back to a simple list of rates for calculation
+        # e.g., [0.03, 0.04, 0.025]
+        yearly_rates_list = [x / 100 for x in edited_rates["Inflation (%)"].tolist()]
+
+        # --- CALCULATION SECTION ---
         future = []
         acc = current_savings
         
-        # 2. The Projection Loop
+        # We need a running "Deflator" to calculate Real Value accurately across changing rates
+        cumulative_deflator = 1.0 
+        
         for m in range(months_to_project):
-            # Accumulate the nominal balance (Simple accumulation)
-            acc += balance 
+            # 1. Determine which year we are in (Year 0, Year 1, etc.)
+            current_year_idx = m // 12
             
-            # Calculate Real Value (Discounting future value to present value)
-            # Formula: PV = FV / (1 + monthly_inflation)^months
-            monthly_inflation = inflation_rate / 12
-            real_value = acc / ((1 + monthly_inflation) ** (m + 1))
+            # 2. Get the specific rate for that year
+            # Safety check: if logic fails, default to 3%
+            if current_year_idx < len(yearly_rates_list):
+                current_annual_rate = yearly_rates_list[current_year_idx]
+            else:
+                current_annual_rate = 0.03
+                
+            monthly_inflation = current_annual_rate / 12
+            
+            # 3. Accumulate Nominal Wealth
+            acc += balance
+            
+            # 4. Calculate Real Wealth (Variable Discounting)
+            # We compound the deflator month by month
+            cumulative_deflator *= (1 + monthly_inflation)
+            real_value = acc / cumulative_deflator
             
             future.append({
-                "Month": m + 1, 
-                "Nominal Wealth (Bank Amount)": acc,
-                "Real Purchasing Power (Today's Value)": real_value
+                "Month": m+1, 
+                "Nominal Wealth": acc,
+                "Real Purchasing Power": real_value
             })
         
-        # 3. Plotting Both Lines
+        # --- PLOTTING SECTION (LEFT COLUMN) ---
         df_future = pd.DataFrame(future)
-        
-        # Melt the dataframe to make it easy for Plotly to draw two lines
         df_melted = df_future.melt(id_vars=["Month"], var_name="Metric", value_name="Amount")
         
         fig2 = px.line(
@@ -315,16 +350,17 @@ with col_right:
             y="Amount", 
             color="Metric",
             color_discrete_map={
-                "Nominal Wealth (Bank Amount)": "#2ecc71",       # Green (Optimistic)
-                "Real Purchasing Power (Today's Value)": "#e74c3c" # Red (Realistic)
+                "Nominal Wealth": "#2ecc71",       # Green
+                "Real Purchasing Power": "#e74c3c" # Red
             }
         )
-        
-        # Fill the area only for the Nominal line for style
-        fig2.update_traces(fill='tozeroy', selector=dict(name="Nominal Wealth (Bank Amount)"))
-        fig2.update_layout(height=300, margin=dict(t=10, b=0, l=0, r=0), legend=dict(orientation="h", y=1.1))
-        
-        st.plotly_chart(fig2, use_container_width=True)
+        fig2.update_traces(fill='tozeroy', selector=dict(name="Nominal Wealth"))
+        fig2.update_layout(
+            height=300, 
+            margin=dict(t=10, b=0, l=0, r=0), 
+            legend=dict(orientation="h", y=1.1, title=None)
+        )
+        t_col1.plotly_chart(fig2, use_container_width=True)
 
     # --- CLOUD DATABASE ---
     with st.container(border=True):
@@ -386,6 +422,7 @@ with col_right:
                         response = client.models.generate_content(model=selected_model, contents=prompt)
                         st.markdown(f"""<div style="background-color: #1e293b; padding: 20px; border-radius: 10px; color: #e2e8f0; border-left: 5px solid #8b5cf6;">{response.text}</div>""", unsafe_allow_html=True)
                 except Exception as e: st.error(f"Error: {e}")
+
 
 
 
