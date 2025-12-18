@@ -46,7 +46,7 @@ def get_default_state():
         ]
     }
 
-# --- GOOGLE SHEETS FUNCTIONS (ROBUST VERSION) ---
+# --- GOOGLE SHEETS FUNCTIONS (ROBUST) ---
 def get_google_sheet_client():
     try:
         if "GCP_CREDENTIALS" in st.secrets:
@@ -68,14 +68,11 @@ def get_sheet_data(worksheet_name):
                 ws = sheet.worksheet(worksheet_name)
                 data = ws.get_all_records()
                 df = pd.DataFrame(data)
-                # Check if dataframe is empty but we expect columns
-                if df.empty: 
-                    return pd.DataFrame()
+                if df.empty: return pd.DataFrame()
                 return df
             except gspread.exceptions.WorksheetNotFound:
                 return pd.DataFrame()
         except Exception as e:
-            # Often caused by header mismatches in gspread
             return pd.DataFrame()
     return pd.DataFrame()
 
@@ -90,35 +87,21 @@ def save_row_to_history(row_data_dict):
             ws = sheet.add_worksheet(title="History", rows=100, cols=20)
             
         # 1. ENFORCE HEADER ROW
-        # Get the keys (column names) from your data
         expected_headers = list(row_data_dict.keys())
-        
-        # Check what is currently in the first row of Google Sheets
         current_headers = ws.row_values(1)
         
-        # If headers are missing or different, Force Update them
         if not current_headers or current_headers != expected_headers:
-            ws.clear() # Wipe sheet to ensure clean slate
+            ws.clear()
             ws.append_row(expected_headers)
         
-        # 2. HANDLE DUPLICATES (Update existing record)
-        # We read all data to find if this Month/Year already exists
+        # 2. HANDLE DUPLICATES
         all_values = ws.get_all_values()
-        
-        # If there is data (more than just header)
         if len(all_values) > 1:
-            # Convert to DF for easy searching
-            # all_values[0] is header, all_values[1:] is data
             df = pd.DataFrame(all_values[1:], columns=all_values[0])
-            
-            # Find index of matching row
-            # We convert columns to string to ensure matching works
             mask = (df['Month'].astype(str) == str(row_data_dict['Month'])) & \
                    (df['Year'].astype(str) == str(row_data_dict['Year']))
             
             if mask.any():
-                # Get the Excel Row Number (Index + 2 because: +1 for header, +1 for 0-based index)
-                # We iterate backwards to delete duplicates safely if multiple exist
                 indices_to_delete = df.index[mask].tolist()
                 for idx in sorted(indices_to_delete, reverse=True):
                     ws.delete_rows(int(idx) + 2)
@@ -138,9 +121,7 @@ def delete_rows_from_sheet(worksheet_name, month_year_list):
             df['Label'] = df['Month'] + " " + df['Year'].astype(str)
             df_clean = df[~df['Label'].isin(month_year_list)]
             df_clean = df_clean.drop(columns=['Label'])
-            
             ws.clear()
-            # Re-write headers and data
             ws.update([df_clean.columns.values.tolist()] + df_clean.values.tolist())
 
 # --- CLOUD SYNC FUNCTIONS ---
@@ -181,7 +162,6 @@ def load_cloud_state():
 
 # --- INITIALIZATION ---
 if 'data_loaded' not in st.session_state:
-    # Try to load draft first, or defaults
     cloud_state = load_cloud_state()
     defaults = get_default_state()
     
@@ -196,7 +176,6 @@ if 'data_loaded' not in st.session_state:
         st.session_state.loaded_month = cloud_state.get('month_select', "December")
         st.session_state.loaded_year = int(cloud_state.get('year_input', datetime.now().year))
     else:
-        # Load Defaults
         st.session_state.expenses = defaults['expenses']
         st.session_state.deductions_list = defaults['deductions']
         st.session_state.loaded_salary = defaults['basic_salary']
@@ -207,12 +186,10 @@ if 'data_loaded' not in st.session_state:
         st.session_state.loaded_month = "December"
         st.session_state.loaded_year = datetime.now().year
     
-    # Initialize Watcher variables
     st.session_state.last_viewed_month = st.session_state.loaded_month
     st.session_state.last_viewed_year = st.session_state.loaded_year
     st.session_state.data_loaded = True
 
-# --- SAFETY CHECK FOR HOT-RELOADS ---
 if 'last_viewed_month' not in st.session_state:
     st.session_state.last_viewed_month = st.session_state.get('loaded_month', "December")
 if 'last_viewed_year' not in st.session_state:
@@ -228,7 +205,6 @@ with st.sidebar:
     if not api_key: api_key = st.text_input("Enter Gemini API Key", type="password")
     else: st.success("Gemini API Key Connected! 🔒")
     
-    # --- NEW: OPEN GOOGLE SHEET BUTTON ---
     if "GCP_CREDENTIALS" in st.secrets: 
         st.success("Google Sheets Connected! ☁️")
         if "SHEET_URL" in st.secrets:
@@ -237,36 +213,29 @@ with st.sidebar:
         st.error("Missing Google Cloud Credentials.")
 
     st.divider()
-    # CLOUD SYNC CONTROLS
     st.markdown("### ☁️ Cross-Device Sync")
     st.info("Switching devices? Use these buttons to sync your draft inputs.")
-    
     col_sync1, col_sync2 = st.columns(2)
     with col_sync1:
         if st.button("⬆️ Upload Draft"):
             with st.spinner("Syncing to Cloud..."):
                 save_cloud_state()
             st.success("Draft Uploaded!")
-            
     with col_sync2:
         if st.button("⬇️ Pull Draft"):
             with st.spinner("Downloading..."):
                 cloud_state = load_cloud_state()
                 if cloud_state:
-                    # Update all keys
                     st.session_state["basic_salary"] = float(cloud_state.get('basic_salary', 0.0))
                     st.session_state["allowances"] = float(cloud_state.get('allowances', 0.0))
                     st.session_state["variable_income"] = float(cloud_state.get('variable_income', 0.0))
                     st.session_state["current_savings"] = float(cloud_state.get('current_savings', 0.0))
                     st.session_state["epf_rate"] = int(cloud_state.get('epf_rate', 11))
-                    
                     st.session_state["month_select"] = cloud_state.get('month_select', "December")
                     st.session_state["year_input"] = int(cloud_state.get('year_input', datetime.now().year))
-                    
                     st.session_state.expenses = json.loads(cloud_state.get('expenses', '[]'))
                     st.session_state.deductions_list = json.loads(cloud_state.get('deductions', '[]'))
                     
-                    # Update helpers
                     st.session_state.loaded_salary = st.session_state["basic_salary"]
                     st.session_state.loaded_allowances = st.session_state["allowances"]
                     st.session_state.loaded_var = st.session_state["variable_income"]
@@ -274,15 +243,11 @@ with st.sidebar:
                     st.session_state.loaded_epf = st.session_state["epf_rate"]
                     st.session_state.loaded_month = st.session_state["month_select"]
                     st.session_state.loaded_year = st.session_state["year_input"]
-                    
-                    # Update watcher
                     st.session_state.last_viewed_month = st.session_state["month_select"]
                     st.session_state.last_viewed_year = st.session_state["year_input"]
-
                     st.rerun() 
             st.success("Draft Updated!")
 
-    # --- AI AUTO-FILL SECTION ---
     st.divider()
     with st.expander("🤖 AI Auto-Fill (Magic)"):
         st.caption("Describe a persona, and AI will fill the dashboard for you.")
@@ -297,8 +262,7 @@ with st.sidebar:
                     try:
                         client = genai.Client(api_key=api_key)
                         prompt_structure = """
-                        You are a Data Entry API. 
-                        Based on this persona: "{persona}"
+                        You are a Data Entry API. Based on this persona: "{persona}"
                         Generate realistic monthly financial figures (in MYR) for a Malaysian context.
                         Return ONLY a valid JSON object with this EXACT structure (no markdown):
                         {{
@@ -313,7 +277,6 @@ with st.sidebar:
                         raw_text = response.text.replace("```json", "").replace("```", "").strip()
                         ai_data = json.loads(raw_text)
                         
-                        # Inject
                         st.session_state["basic_salary"] = float(ai_data.get("basic_salary", 0))
                         st.session_state["allowances"] = float(ai_data.get("allowances", 0))
                         st.session_state["variable_income"] = float(ai_data.get("variable_income", 0))
@@ -322,7 +285,6 @@ with st.sidebar:
                         st.session_state.expenses = ai_data.get("expenses", [])
                         st.session_state.deductions_list = ai_data.get("deductions", [])
                         
-                        # Sync Helpers
                         st.session_state.loaded_salary = st.session_state["basic_salary"]
                         st.session_state.loaded_allowances = st.session_state["allowances"]
                         st.session_state.loaded_var = st.session_state["variable_income"]
@@ -355,23 +317,18 @@ with col_left:
         months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
         
         # --- SMART CONTEXT SWITCHING LOGIC ---
-        # 1. Determine index
         try: def_idx = months.index(st.session_state.loaded_month)
         except: def_idx = 0
         
-        # 2. Render Widgets
         selected_month = d_col1.selectbox("Month", months, index=def_idx, key="month_select")
         selected_year = d_col2.number_input("Year", min_value=2020, max_value=2030, value=st.session_state.loaded_year, key="year_input")
         
-        # 3. THE WATCHER: Check if Month/Year Changed
+        # THE WATCHER: Check if Month/Year Changed (Automatic Reset)
         if (selected_month != st.session_state.last_viewed_month) or (selected_year != st.session_state.last_viewed_year):
-            # The user just switched dates!
             with st.spinner(f"Checking records for {selected_month} {selected_year}..."):
                 df_history = get_sheet_data("History")
-                
                 found_record = None
                 if not df_history.empty and 'Month' in df_history.columns and 'Year' in df_history.columns:
-                     # Filter for the selected month/year
                      mask = (df_history['Month'] == selected_month) & (df_history['Year'] == selected_year)
                      if mask.any():
                          found_record = df_history[mask].iloc[0]
@@ -382,12 +339,10 @@ with col_left:
                         st.session_state["basic_salary"] = float(found_record.get('Basic_Salary', 0))
                         st.session_state["allowances"] = float(found_record.get('Allowances', 0))
                         st.session_state["variable_income"] = float(found_record.get('Variable_Income', 0))
-                        st.session_state["current_savings"] = float(found_record.get('Current_Savings', 0)) 
+                        st.session_state["current_savings"] = float(found_record.get('Current_Savings', 0))
                         st.session_state["epf_rate"] = int(found_record.get('EPF_Rate', 11))
-                        
                         st.session_state.expenses = json.loads(found_record.get('Expenses_JSON', '[]'))
                         st.session_state.deductions_list = json.loads(found_record.get('Deductions_JSON', '[]'))
-                        
                         st.toast(f"📂 Loaded data for {selected_month} {selected_year}", icon="✅")
                     except Exception as e:
                         st.error(f"Error loading record: {e}")
@@ -401,21 +356,16 @@ with col_left:
                     st.session_state["epf_rate"] = defaults['epf_rate']
                     st.session_state.expenses = defaults['expenses']
                     st.session_state.deductions_list = defaults['deductions']
-                    
                     st.toast(f"✨ New Month: {selected_month} {selected_year} (Reset to Default)", icon="🆕")
 
-                # Update Checkpoints
                 st.session_state.loaded_salary = st.session_state["basic_salary"]
                 st.session_state.loaded_allowances = st.session_state["allowances"]
                 st.session_state.loaded_var = st.session_state["variable_income"]
                 st.session_state.loaded_savings = st.session_state["current_savings"]
                 st.session_state.loaded_epf = st.session_state["epf_rate"]
-                
                 st.session_state.last_viewed_month = selected_month
                 st.session_state.last_viewed_year = selected_year
-                
                 st.rerun()
-        # -------------------------------------
 
         st.divider()
         current_savings = st.number_input("Current Savings", value=st.session_state.loaded_savings, step=1000.0, key="current_savings")
@@ -471,7 +421,6 @@ with col_right:
             fig.update_layout(height=300, margin=dict(t=30, b=0, l=0, r=0))
             st.plotly_chart(fig, use_container_width=True)
 
-    # --- DYNAMIC WEALTH PROJECTION ---
     with st.container(border=True):
         t_col1, t_col2 = st.columns([3, 1])
         t_col1.subheader("📈 Wealth Projection")
@@ -543,7 +492,6 @@ with col_right:
         st.subheader("☁️ Cloud Database")
         db_col1, db_col2 = st.columns(2)
         
-        # We now save ALL the inputs to History so we can reload them later
         current_data = {
             "Date": datetime(selected_year, months.index(selected_month)+1, 1).strftime("%Y-%m-%d"),
             "Month": selected_month, 
@@ -552,8 +500,6 @@ with col_right:
             "Total_Expenses": total_exp, 
             "Balance": balance, 
             "EPF_Savings": epf_amount,
-            
-            # --- NEW DATA FOR RELOADING ---
             "Basic_Salary": basic_salary,
             "Allowances": allowances,
             "Variable_Income": variable_income,
@@ -568,29 +514,67 @@ with col_right:
                 with st.spinner("Saving full record..."):
                     save_row_to_history(current_data)
                     st.success("Record Saved!")
-                    st.session_state.last_viewed_month = selected_month # Prevent auto-reload loop
+                    st.session_state.last_viewed_month = selected_month
                     st.rerun()
 
         st.divider()
+        
+        # --- NEW: LOAD & DELETE SECTIONS ---
         df_hist = get_sheet_data("History")
-        if not df_hist.empty:
-            if 'Month' in df_hist.columns and 'Year' in df_hist.columns:
-                df_hist['Label'] = df_hist['Month'] + " " + df_hist['Year'].astype(str)
-                to_delete = st.multiselect("Select records to delete:", df_hist['Label'].unique())
-                if to_delete:
-                    if st.button("🗑️ Delete Selected"):
+        if not df_hist.empty and 'Month' in df_hist.columns and 'Year' in df_hist.columns:
+            df_hist['Label'] = df_hist['Month'] + " " + df_hist['Year'].astype(str)
+            
+            c_load, c_del = st.columns(2)
+            
+            # 1. LOAD RECORD (JUMP BACK)
+            with c_load:
+                st.caption("📂 Load / Jump to Record")
+                record_to_load = st.selectbox("Select Record", df_hist['Label'].unique(), index=None, placeholder="Choose past month...", key="loader_box")
+                if st.button("Load Record", key="btn_load"):
+                    if record_to_load:
+                        with st.spinner("Loading..."):
+                            row = df_hist[df_hist['Label'] == record_to_load].iloc[0]
+                            # Update Session Keys
+                            st.session_state["month_select"] = row['Month']
+                            st.session_state["year_input"] = int(row['Year'])
+                            
+                            st.session_state["basic_salary"] = float(row.get('Basic_Salary', 0))
+                            st.session_state["allowances"] = float(row.get('Allowances', 0))
+                            st.session_state["variable_income"] = float(row.get('Variable_Income', 0))
+                            st.session_state["current_savings"] = float(row.get('Current_Savings', 0))
+                            st.session_state["epf_rate"] = int(row.get('EPF_Rate', 11))
+                            st.session_state.expenses = json.loads(row.get('Expenses_JSON', '[]'))
+                            st.session_state.deductions_list = json.loads(row.get('Deductions_JSON', '[]'))
+                            
+                            # Sync Helpers
+                            st.session_state.loaded_salary = st.session_state["basic_salary"]
+                            st.session_state.loaded_allowances = st.session_state["allowances"]
+                            st.session_state.loaded_var = st.session_state["variable_income"]
+                            st.session_state.loaded_savings = st.session_state["current_savings"]
+                            st.session_state.loaded_epf = st.session_state["epf_rate"]
+                            st.session_state.loaded_month = row['Month']
+                            st.session_state.loaded_year = int(row['Year'])
+                            st.session_state.last_viewed_month = row['Month']
+                            st.session_state.last_viewed_year = int(row['Year'])
+                            
+                            st.rerun()
+
+            # 2. DELETE RECORD
+            with c_del:
+                st.caption("🗑️ Delete Record")
+                to_delete = st.multiselect("Select Record", df_hist['Label'].unique(), key="deleter_box")
+                if st.button("Delete Selected", key="btn_del"):
+                    if to_delete:
                         delete_rows_from_sheet("History", to_delete)
                         st.success("Deleted!")
                         st.rerun()
-                
-                st.caption("History Trend")
-                if 'Date' in df_hist.columns:
-                    df_hist['Date'] = pd.to_datetime(df_hist['Date'])
-                    df_hist = df_hist.sort_values('Date')
-                    fig_hist = px.line(df_hist, x='Date', y=['Net_Income', 'Balance'], markers=True, height=250)
-                    st.plotly_chart(fig_hist, use_container_width=True)
-            else:
-                st.warning("History sheet found but columns are missing. Delete the 'History' sheet in Google Drive to reset.")
+
+            st.caption("History Trend")
+            if 'Date' in df_hist.columns:
+                df_hist['Date'] = pd.to_datetime(df_hist['Date'])
+                df_hist = df_hist.sort_values('Date')
+                fig_hist = px.line(df_hist, x='Date', y=['Net_Income', 'Balance'], markers=True, height=250)
+                st.plotly_chart(fig_hist, use_container_width=True)
         else:
             st.info("No history found in Cloud.")
 
@@ -616,4 +600,3 @@ with col_right:
                         response = client.models.generate_content(model=selected_auditor_model, contents=prompt)
                         st.markdown(f"""<div style="background-color: #1e293b; padding: 20px; border-radius: 10px; color: #e2e8f0; border-left: 5px solid #8b5cf6;">{response.text}</div>""", unsafe_allow_html=True)
                 except Exception as e: st.error(f"Error: {e}")
-
