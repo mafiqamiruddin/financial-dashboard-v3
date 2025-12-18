@@ -175,7 +175,7 @@ with st.sidebar:
                 save_cloud_state()
             st.success("Draft Uploaded!")
             
-with col_sync2:
+    with col_sync2:
         if st.button("⬇️ Pull Draft"):
             with st.spinner("Downloading..."):
                 cloud_state = load_cloud_state()
@@ -350,4 +350,5 @@ with col_right:
                         response = client.models.generate_content(model=selected_model, contents=prompt)
                         st.markdown(f"""<div style="background-color: #1e293b; padding: 20px; border-radius: 10px; color: #e2e8f0; border-left: 5px solid #8b5cf6;">{response.text}</div>""", unsafe_allow_html=True)
                 except Exception as e: st.error(f"Error: {e}")
+
 
