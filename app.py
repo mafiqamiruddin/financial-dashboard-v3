@@ -175,21 +175,35 @@ with st.sidebar:
                 save_cloud_state()
             st.success("Draft Uploaded!")
             
-    with col_sync2:
+with col_sync2:
         if st.button("⬇️ Pull Draft"):
             with st.spinner("Downloading..."):
                 cloud_state = load_cloud_state()
                 if cloud_state:
-                    # Update Session State
+                    # 1. Update the Widget Keys directly (This forces the UI to change)
+                    st.session_state["basic_salary"] = float(cloud_state.get('basic_salary', 0.0))
+                    st.session_state["allowances"] = float(cloud_state.get('allowances', 0.0))
+                    st.session_state["variable_income"] = float(cloud_state.get('variable_income', 0.0))
+                    st.session_state["current_savings"] = float(cloud_state.get('current_savings', 0.0))
+                    st.session_state["epf_rate"] = int(cloud_state.get('epf_rate', 11))
+                    
+                    # 2. Update Month/Year Keys
+                    st.session_state["month_select"] = cloud_state.get('month_select', "December")
+                    st.session_state["year_input"] = int(cloud_state.get('year_input', datetime.now().year))
+                    
+                    # 3. Update Lists (Expenses/Deductions)
                     st.session_state.expenses = json.loads(cloud_state.get('expenses', '[]'))
                     st.session_state.deductions_list = json.loads(cloud_state.get('deductions', '[]'))
-                    st.session_state.loaded_salary = float(cloud_state.get('basic_salary'))
-                    st.session_state.loaded_allowances = float(cloud_state.get('allowances'))
-                    st.session_state.loaded_var = float(cloud_state.get('variable_income'))
-                    st.session_state.loaded_savings = float(cloud_state.get('current_savings'))
-                    st.session_state.loaded_epf = int(cloud_state.get('epf_rate'))
-                    st.session_state.loaded_month = cloud_state.get('month_select')
-                    st.session_state.loaded_year = int(cloud_state.get('year_input'))
+                    
+                    # 4. Update the "loaded_" helpers too (to keep them in sync for safety)
+                    st.session_state.loaded_salary = st.session_state["basic_salary"]
+                    st.session_state.loaded_allowances = st.session_state["allowances"]
+                    st.session_state.loaded_var = st.session_state["variable_income"]
+                    st.session_state.loaded_savings = st.session_state["current_savings"]
+                    st.session_state.loaded_epf = st.session_state["epf_rate"]
+                    st.session_state.loaded_month = st.session_state["month_select"]
+                    st.session_state.loaded_year = st.session_state["year_input"]
+
                     st.rerun() # Refresh page to show new data
             st.success("Draft Updated!")
 
@@ -336,3 +350,4 @@ with col_right:
                         response = client.models.generate_content(model=selected_model, contents=prompt)
                         st.markdown(f"""<div style="background-color: #1e293b; padding: 20px; border-radius: 10px; color: #e2e8f0; border-left: 5px solid #8b5cf6;">{response.text}</div>""", unsafe_allow_html=True)
                 except Exception as e: st.error(f"Error: {e}")
+
