@@ -90,10 +90,6 @@ def save_row_to_history(row_data_dict):
         if not existing_data:
             ws.append_row(list(row_data_dict.keys()))
         
-        # We need to handle overwriting if the record exists for this Month/Year
-        # But for simplicity, we append (and rely on deleting duplicates later)
-        # Or ideally: Find row with same Month/Year and update it.
-        
         # --- ROBUST SAVE: Check for existing Month/Year and Update ---
         records = ws.get_all_records()
         df = pd.DataFrame(records)
@@ -105,10 +101,6 @@ def save_row_to_history(row_data_dict):
             if mask.any():
                 # Get the row index (1-based, +1 for header)
                 row_idx = df.index[mask][0] + 2 
-                # Update the row
-                cell_range = ws.range(f"A{row_idx}:Z{row_idx}") # Assuming max Z cols
-                # This is complex to map dict to cells by index. 
-                # SIMPLER STRATEGY: Delete old, Append new.
                 ws.delete_rows(int(row_idx))
                 
         ws.append_row(list(row_data_dict.values()))
@@ -197,9 +189,8 @@ if 'data_loaded' not in st.session_state:
     st.session_state.last_viewed_month = st.session_state.loaded_month
     st.session_state.last_viewed_year = st.session_state.loaded_year
     st.session_state.data_loaded = True
-   
-# --- SAFETY FIX: Ensure Watcher Variables Exist ---
-# If the app was already running, these might be missing. We inject them here.
+
+# --- SAFETY CHECK FOR HOT-RELOADS ---
 if 'last_viewed_month' not in st.session_state:
     st.session_state.last_viewed_month = st.session_state.get('loaded_month', "December")
 if 'last_viewed_year' not in st.session_state:
@@ -215,8 +206,13 @@ with st.sidebar:
     if not api_key: api_key = st.text_input("Enter Gemini API Key", type="password")
     else: st.success("Gemini API Key Connected! 🔒")
     
-    if "GCP_CREDENTIALS" in st.secrets: st.success("Google Sheets Connected! ☁️")
-    else: st.error("Missing Google Cloud Credentials.")
+    # --- NEW: OPEN GOOGLE SHEET BUTTON ---
+    if "GCP_CREDENTIALS" in st.secrets: 
+        st.success("Google Sheets Connected! ☁️")
+        if "SHEET_URL" in st.secrets:
+            st.link_button("📂 Open Google Database", st.secrets["SHEET_URL"])
+    else: 
+        st.error("Missing Google Cloud Credentials.")
 
     st.divider()
     # CLOUD SYNC CONTROLS
@@ -364,7 +360,7 @@ with col_left:
                         st.session_state["basic_salary"] = float(found_record.get('Basic_Salary', 0))
                         st.session_state["allowances"] = float(found_record.get('Allowances', 0))
                         st.session_state["variable_income"] = float(found_record.get('Variable_Income', 0))
-                        st.session_state["current_savings"] = float(found_record.get('Current_Savings', 0)) # Note: Savings implies 'Balance' usually, but we store input
+                        st.session_state["current_savings"] = float(found_record.get('Current_Savings', 0)) 
                         st.session_state["epf_rate"] = int(found_record.get('EPF_Rate', 11))
                         
                         st.session_state.expenses = json.loads(found_record.get('Expenses_JSON', '[]'))
@@ -598,4 +594,3 @@ with col_right:
                         response = client.models.generate_content(model=selected_auditor_model, contents=prompt)
                         st.markdown(f"""<div style="background-color: #1e293b; padding: 20px; border-radius: 10px; color: #e2e8f0; border-left: 5px solid #8b5cf6;">{response.text}</div>""", unsafe_allow_html=True)
                 except Exception as e: st.error(f"Error: {e}")
-
