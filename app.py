@@ -274,6 +274,18 @@ with st.sidebar:
                         st.rerun()
                     except Exception as e: st.error(f"Error: {e}")
 
+    # --- RESTORED BUTTON ---
+    st.divider()
+    if st.button("🛠️ Check Available Models"):
+        if not api_key: st.error("API Key required.")
+        else:
+            try:
+                client = genai.Client(api_key=api_key)
+                models = client.models.list()
+                fetched = [m.name.replace("models/", "") for m in models if "gemini" in m.name and "embedding" not in m.name]
+                if fetched: st.session_state.available_models = sorted(fetched); st.success(f"Found {len(fetched)} models!")
+            except Exception as e: st.error(f"Error: {e}")
+
 # --- MAIN LAYOUT ---
 col_left, col_right = st.columns([1, 1.5], gap="large")
 
