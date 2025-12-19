@@ -4,6 +4,7 @@ from google import genai
 import plotly.express as px
 import os
 import json
+import base64
 from datetime import datetime
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
@@ -11,127 +12,121 @@ import yfinance as yf
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(
-    page_title="Smart Cashflow Apps", 
-    page_icon="🧬",
+    page_title="Smart Cashflow", 
+    page_icon="💸",
     layout="wide", 
     initial_sidebar_state="expanded"
 )
 
-# --- ADVANCED CUSTOM CSS (AESTHETIC & TECH THEME) ---
+# --- BACKGROUND & THEME LOGIC ---
+def set_background(png_file=None, gradient=None):
+    """Injects CSS to change the app background."""
+    bin_str = ""
+    css_bg = ""
+    
+    if png_file:
+        # User uploaded image
+        try:
+            data = png_file.getvalue()
+            bin_str = base64.b64encode(data).decode()
+            css_bg = f"""
+                background-image: url("data:image/png;base64,{bin_str}");
+                background-size: cover;
+                background-repeat: no-repeat;
+                background-attachment: fixed;
+            """
+        except:
+            st.error("Error loading image.")
+            return
+    elif gradient:
+        # Preset Gradient
+        css_bg = f"background: {gradient}; background-attachment: fixed;"
+    else:
+        # Default
+        css_bg = "background-color: #f8fafc;"
+
+    st.markdown(f"""
+    <style>
+    .stApp {{
+        {css_bg}
+    }}
+    </style>
+    """, unsafe_allow_html=True)
+
+# --- GLOBAL STYLING (GLASSMORPHISM) ---
 st.markdown("""
 <style>
-    /* IMPORT GOOGLE FONT INTER */
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
 
-    /* GLOBAL STYLES */
-    .stApp {
-        background-color: #f8fafc; /* Very light cool gray */
+    /* FONT */
+    html, body, [class*="css"] {
         font-family: 'Inter', sans-serif;
     }
-    
-    /* REMOVE TOP PADDING */
-    .block-container {
-        padding-top: 2rem;
-    }
 
-    /* CARD STYLE CONTAINERS */
+    /* REMOVE PADDING */
+    .block-container { padding-top: 2rem; }
+
+    /* CARD UI - SEMI-TRANSPARENT WHITE (GLASS) */
     .stContainer {
-        background-color: #ffffff;
+        background-color: rgba(255, 255, 255, 0.95); /* Slight transparency */
         border-radius: 16px;
         padding: 24px;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
-        border: 1px solid #f1f5f9;
+        box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.07);
+        backdrop-filter: blur(4px);
+        -webkit-backdrop-filter: blur(4px);
+        border: 1px solid rgba(255, 255, 255, 0.18);
         margin-bottom: 24px;
     }
 
     /* HEADERS */
-    h1, h2, h3 {
-        color: #0f172a;
-        font-weight: 700;
-        letter-spacing: -0.025em;
-    }
-    
-    h4 {
-        font-weight: 600;
-        color: #334155;
-    }
+    h1, h2, h3 { color: #0f172a; font-weight: 700; letter-spacing: -0.025em; }
+    h4 { font-weight: 600; color: #334155; }
 
-    /* INPUT FIELDS - CLEANER LOOK */
+    /* INPUTS */
     .stTextInput>div>div>input, .stNumberInput>div>div>input, .stSelectbox>div>div>div {
-        border-radius: 8px;
-        border: 1px solid #cbd5e1;
-        color: #334155;
+        border-radius: 8px; border: 1px solid #cbd5e1; color: #334155;
     }
 
-    /* BUTTONS - TECH STYLE */
+    /* BUTTONS */
     .stButton>button {
-        width: 100%;
-        border-radius: 10px;
-        font-weight: 600;
-        border: none;
-        padding: 0.6rem 1rem;
+        width: 100%; border-radius: 10px; font-weight: 600; border: none; padding: 0.6rem 1rem;
+        background-color: #ffffff; color: #0f172a; border: 1px solid #e2e8f0;
         transition: all 0.2s;
     }
+    .stButton>button:hover { background-color: #f1f5f9; }
     
-    /* Primary Action Buttons */
+    /* PRIMARY BUTTONS */
     div[data-testid="stVerticalBlock"] > div > div > div > div > button[kind="primary"] {
-        background: linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%);
-        box-shadow: 0 4px 14px 0 rgba(79, 70, 229, 0.39);
+        background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+        color: white; border: none;
+        box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.2);
     }
 
-    /* METRICS - BIG & BOLD */
-    [data-testid="stMetricValue"] {
-        font-size: 28px;
-        font-weight: 700;
-        color: #1e293b;
-        font-family: 'Inter', monospace;
-    }
-    [data-testid="stMetricLabel"] {
-        font-size: 14px;
-        font-weight: 600;
-        color: #64748b;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-    }
+    /* METRICS & BADGES */
+    [data-testid="stMetricValue"] { font-size: 28px; font-weight: 700; color: #1e293b; }
+    [data-testid="stMetricLabel"] { font-size: 14px; font-weight: 600; color: #64748b; letter-spacing: 0.05em; }
 
-    /* BADGES FOR TOTALS */
     .total-badge {
-        padding: 8px 12px;
-        border-radius: 8px;
-        font-weight: 600;
-        font-size: 15px;
-        display: inline-block;
-        margin-top: 10px;
-        width: 100%;
-        text-align: center;
+        padding: 8px 12px; border-radius: 8px; font-weight: 600; font-size: 15px;
+        display: inline-block; margin-top: 10px; width: 100%; text-align: center;
     }
     .badge-green { background-color: #dcfce7; color: #166534; border: 1px solid #bbf7d0; }
     .badge-red { background-color: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
     .badge-blue { background-color: #dbeafe; color: #1e40af; border: 1px solid #bfdbfe; }
 
-    /* AI BOX STYLING */
+    /* AI BOX */
     .ai-box {
-        background-color: #1e293b;
-        border-radius: 12px;
-        padding: 20px;
-        color: #e2e8f0;
-        border-left: 4px solid #8b5cf6;
-        font-family: 'Inter', sans-serif;
-        box-shadow: inset 0 2px 4px 0 rgba(0, 0, 0, 0.2);
+        background-color: #0f172a; border-radius: 12px; padding: 20px;
+        color: #e2e8f0; border-left: 4px solid #6366f1; font-family: 'Inter', sans-serif;
     }
     
-    /* TABLE STYLING */
-    [data-testid="stDataEditor"] {
-        border: 1px solid #e2e8f0;
-        border-radius: 10px;
-        overflow: hidden;
-    }
+    /* TABLE */
+    [data-testid="stDataEditor"] { border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; }
 </style>
 """, unsafe_allow_html=True)
 
 # --- HELPER: DEFAULT TEMPLATE ---
 def get_default_state():
-    """Returns the baseline 'clean slate' data."""
     return {
         "basic_salary": 6000.0,
         "allowances": 500.0,
@@ -184,7 +179,6 @@ def get_sheet_data(worksheet_name):
     return pd.DataFrame()
 
 def save_row_to_history(row_data_dict):
-    """Saves a row to History with strict Header Enforcement."""
     client = get_google_sheet_client()
     if client:
         sheet = client.open_by_url(st.secrets["SHEET_URL"])
@@ -231,14 +225,9 @@ def convert_value(value, rate):
     return value * rate
 
 def perform_currency_switch(target_currency):
-    """Converts the entire session state to the new currency."""
     current_currency = st.session_state.active_currency
-    
-    if current_currency == target_currency:
-        return
+    if current_currency == target_currency: return
 
-    rate = 1.0
-    
     # 1. Normalize to MYR first
     if current_currency != "MYR":
         ticker = f"{current_currency}MYR=X"
@@ -253,13 +242,10 @@ def perform_currency_switch(target_currency):
                 for exp in st.session_state.expenses: exp['Amount'] *= to_myr_rate
                 for ded in st.session_state.deductions_list: ded['Amount'] *= to_myr_rate
             else:
-                st.error("Could not fetch rates to normalize currency.")
-                return
-        except:
-            st.error("Currency API Error")
-            return
+                st.error("Rate Error"); return
+        except: st.error("API Error"); return
 
-    # 2. Convert from MYR to Target
+    # 2. Convert to Target
     if target_currency != "MYR":
         ticker = f"MYR{target_currency}=X"
         try:
@@ -273,13 +259,9 @@ def perform_currency_switch(target_currency):
                 for exp in st.session_state.expenses: exp['Amount'] *= to_target_rate
                 for ded in st.session_state.deductions_list: ded['Amount'] *= to_target_rate
             else:
-                st.error("Could not fetch target rates.")
-                return
-        except:
-            st.error("Currency API Error")
-            return
+                st.error("Rate Error"); return
+        except: st.error("API Error"); return
 
-    # 3. Update Sync Helpers & State
     st.session_state.loaded_salary = st.session_state.basic_salary
     st.session_state.loaded_allowances = st.session_state.allowances
     st.session_state.loaded_var = st.session_state.variable_income
@@ -300,7 +282,7 @@ def save_cloud_state():
         "epf_rate": st.session_state.get('epf_rate', 11),
         "month_select": st.session_state.get('month_select', "December"),
         "year_input": st.session_state.get('year_input', datetime.now().year),
-        "currency": st.session_state.get('active_currency', "MYR") # Save Currency
+        "currency": st.session_state.get('active_currency', "MYR")
     }
     client = get_google_sheet_client()
     if client:
@@ -323,17 +305,15 @@ def load_cloud_state():
     return None
 
 # --- CURRENCY HELPER ---
-@st.cache_data(ttl=3600) # Cache for 1 hour
+@st.cache_data(ttl=3600)
 def get_currency_data(target_currency_code):
-    """Fetches MYR to Target Currency data."""
     try:
         ticker_symbol = f"MYR{target_currency_code}=X"
         ticker = yf.Ticker(ticker_symbol)
         hist = ticker.history(period="1y")
         current_rate = hist['Close'].iloc[-1]
         return current_rate, hist
-    except Exception as e:
-        return None, None
+    except: return None, None
 
 # --- INITIALIZATION ---
 if 'data_loaded' not in st.session_state:
@@ -367,55 +347,74 @@ if 'data_loaded' not in st.session_state:
     st.session_state.last_viewed_year = st.session_state.loaded_year
     st.session_state.data_loaded = True
 
-# Safety Check
 if 'last_viewed_month' not in st.session_state:
     st.session_state.last_viewed_month = st.session_state.get('loaded_month', "December")
 if 'last_viewed_year' not in st.session_state:
     st.session_state.last_viewed_year = st.session_state.get('loaded_year', datetime.now().year)
 if 'active_currency' not in st.session_state:
     st.session_state.active_currency = "MYR"
-
 if 'available_models' not in st.session_state:
     st.session_state.available_models = ["gemini-1.5-flash", "gemini-2.0-flash-exp"]
 
 # --- SIDEBAR ---
 with st.sidebar:
-    st.header("⚙️ Settings")
+    st.title("💸 Smart Cashflow")
+    st.caption("Financial Digital Twin")
+    
+    # --- 1. THEME SWITCHER (NEW) ---
+    st.divider()
+    st.markdown("### 🎨 Appearance")
+    theme_choice = st.radio("Background:", ["Default (Clean)", "Midnight Blue", "Sunset", "Custom Image"], label_visibility="collapsed")
+    
+    if theme_choice == "Midnight Blue":
+        set_background(gradient="linear-gradient(to right, #0f2027, #203a43, #2c5364)")
+    elif theme_choice == "Sunset":
+        set_background(gradient="linear-gradient(to right, #ff9966, #ff5e62)")
+    elif theme_choice == "Custom Image":
+        bg_file = st.file_uploader("Upload Image (PNG/JPG)", type=["png", "jpg", "jpeg"])
+        if bg_file: set_background(png_file=bg_file)
+    else:
+        set_background(gradient=None) # Default
+
+    st.divider()
+    
+    # --- 2. CONFIG ---
+    st.header("⚙️ Configuration")
     api_key = st.secrets.get("GEMINI_API_KEY", None)
-    if not api_key: api_key = st.text_input("Enter Gemini API Key", type="password")
+    if not api_key: api_key = st.text_input("Gemini API Key", type="password")
     else: st.success("Gemini Connected 🧠")
     
     if "GCP_CREDENTIALS" in st.secrets: 
-        st.success("Google Cloud Active ☁️")
+        st.success("Cloud DB Active ☁️")
         if "SHEET_URL" in st.secrets:
             st.link_button("📂 View Database", st.secrets["SHEET_URL"])
-    else: 
-        st.error("Missing Google Cloud Credentials.")
+    else: st.error("Missing Google Cloud Credentials.")
 
     st.divider()
     
-    # --- GLOBAL CURRENCY SWITCHER ---
+    # --- 3. CURRENCY ---
     st.markdown("### 💱 Currency")
     currency_options = ["MYR", "USD", "GBP", "SGD", "EUR", "AUD", "JPY"]
     selected_currency = st.selectbox(
-        "Dashboard Currency", 
+        "Display Currency", 
         currency_options, 
         index=currency_options.index(st.session_state.active_currency) if st.session_state.active_currency in currency_options else 0
     )
-    
     if selected_currency != st.session_state.active_currency:
-        with st.spinner(f"Converting dashboard to {selected_currency}..."):
+        with st.spinner(f"Converting to {selected_currency}..."):
             perform_currency_switch(selected_currency)
 
     st.divider()
+    
+    # --- 4. SYNC ---
     st.markdown("### ☁️ Sync")
-    col_sync1, col_sync2 = st.columns(2)
-    with col_sync1:
+    c1, c2 = st.columns(2)
+    with c1:
         if st.button("⬆️ Upload"):
             with st.spinner("Syncing..."):
                 save_cloud_state()
             st.success("Uploaded!")
-    with col_sync2:
+    with c2:
         if st.button("⬇️ Pull"):
             with st.spinner("Downloading..."):
                 cloud_state = load_cloud_state()
@@ -475,7 +474,6 @@ with st.sidebar:
                         st.rerun()
                     except Exception as e: st.error(f"Error: {e}")
 
-    # --- RESTORED BUTTON ---
     st.divider()
     if st.button("🛠️ Check AI Models"):
         if not api_key: st.error("API Key required.")
@@ -488,15 +486,14 @@ with st.sidebar:
             except Exception as e: st.error(f"Error: {e}")
 
 # --- MAIN LAYOUT ---
-st.title("🧬 FinTwin: Financial Digital Twin")
+st.title("💸 Smart Cashflow")
+st.caption(f"Intelligent Financial Twin | Current Mode: {st.session_state.active_currency}")
 st.markdown("---")
 
 col_left, col_right = st.columns([1, 1.2], gap="large")
-
 curr = st.session_state.active_currency
 
 with col_left:
-    # --- PERIOD & INCOME ---
     with st.container():
         st.subheader(f"📅 Period & Income ({curr})")
         d_col1, d_col2 = st.columns(2)
@@ -557,12 +554,11 @@ with col_left:
         total_gross = basic_salary + allowances + variable_income
         st.markdown(f"<div class='total-badge badge-green'>Total Gross Income: {curr} {total_gross:,.2f}</div>", unsafe_allow_html=True)
 
-    # --- DEDUCTIONS ---
     with st.container():
         st.subheader(f"📉 Deductions ({curr})")
         epf_rate = st.slider("EPF Rate (%)", 0, 20, st.session_state.loaded_epf, key="epf_rate") 
         epf_amount = (basic_salary + allowances) * (epf_rate / 100)
-        st.info(f"EPF Contribution: {curr} {epf_amount:.2f}")
+        st.info(f"EPF Contribution: {curr} {epf_amount:,.2f}")
         
         df_deductions_input = pd.DataFrame(st.session_state.deductions_list)
         edited_deductions = st.data_editor(df_deductions_input, num_rows="dynamic", use_container_width=True, key="deductions_editor", column_config={"Category": st.column_config.TextColumn("Deduction Name"), "Amount": st.column_config.NumberColumn(f"Amount ({curr})", format="%.2f")})
@@ -570,7 +566,6 @@ with col_left:
         total_deductions = epf_amount + (edited_deductions['Amount'].sum() if not edited_deductions.empty else 0)
         st.markdown(f"<div class='total-badge badge-red'>Total Deducted: {curr} {total_deductions:,.2f}</div>", unsafe_allow_html=True)
 
-    # --- EXPENSES ---
     with st.container():
         st.subheader(f"🧾 Expenses ({curr})")
         df_expenses_input = pd.DataFrame(st.session_state.expenses)
@@ -585,14 +580,12 @@ with col_right:
     total_exp = edited_expenses['Amount'].sum() if not edited_expenses.empty else 0
     balance = net - total_exp
 
-    # --- SNAPSHOT HERO CARD ---
     with st.container():
         st.markdown(f"### 📊 Snapshot: {selected_month} {selected_year}")
         c1, c2 = st.columns(2)
         c1.metric("Net Disposable", f"{curr} {net:,.2f}")
         c2.metric("Monthly Surplus", f"{curr} {balance:,.2f}", delta=f"{balance:,.2f}")
 
-    # --- CURRENCY CHART ---
     if curr != "MYR":
         with st.container():
             st.subheader(f"💱 MYR to {curr} Trend")
@@ -643,7 +636,6 @@ with col_right:
         fig2.update_layout(height=300, margin=dict(t=10, b=0, l=0, r=0), legend=dict(orientation="h", y=1.1, title=None))
         t_col1.plotly_chart(fig2, use_container_width=True)
 
-    # --- CLOUD DATABASE ---
     with st.container():
         st.subheader("☁️ Cloud Database")
         db_col1, db_col2 = st.columns(2)
@@ -717,7 +709,6 @@ with col_right:
         else:
             st.info("No history found.")
 
-    # --- AI AUDITOR ---
     st.markdown("###")
     with st.container():
         st.markdown("""<div class='ai-box'><h3>🤖 AI Financial Auditor</h3></div>""", unsafe_allow_html=True)
@@ -738,4 +729,3 @@ with col_right:
                         response = client.models.generate_content(model=selected_auditor_model, contents=prompt)
                         st.markdown(f"""<div class='ai-box'>{response.text}</div>""", unsafe_allow_html=True)
                 except Exception as e: st.error(f"Error: {e}")
-
