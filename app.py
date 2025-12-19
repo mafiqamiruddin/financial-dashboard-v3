@@ -7,6 +7,7 @@ import json
 from datetime import datetime
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
+import yfinance as yf # NEW LIBRARY FOR CURRENCY
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="MY Financial Dashboard", layout="wide", initial_sidebar_state="expanded")
@@ -152,6 +153,25 @@ def load_cloud_state():
             if data: return data[-1]
         except: return None
     return None
+
+# --- CURRENCY HELPER ---
+@st.cache_data(ttl=3600) # Cache for 1 hour to save speed
+def get_currency_data(target_currency_code):
+    """Fetches MYR to Target Currency data."""
+    try:
+        # Yahoo Finance Ticker Format: MYRUSD=X
+        ticker_symbol = f"MYR{target_currency_code}=X"
+        ticker = yf.Ticker(ticker_symbol)
+        
+        # Get historical data for chart (1 year)
+        hist = ticker.history(period="1y")
+        
+        # Get current rate (last close)
+        current_rate = hist['Close'].iloc[-1]
+        
+        return current_rate, hist
+    except Exception as e:
+        return None, None
 
 # --- INITIALIZATION ---
 if 'data_loaded' not in st.session_state:
@@ -381,6 +401,41 @@ with col_right:
     c1, c2 = st.columns(2)
     with c1: st.metric("Net Disposable", f"RM {net:.2f}")
     with c2: st.metric("Monthly Surplus", f"RM {balance:.2f}", delta=f"{balance:.2f}")
+
+    # --- NEW: CURRENCY CONVERTER ---
+    with st.container(border=True):
+        st.subheader("💱 Real-Time Exchange")
+        
+        # Currency Dictionary
+        currency_options = {
+            "🇺🇸 USD (US Dollar)": "USD",
+            "🇬🇧 GBP (British Pound)": "GBP",
+            "🇸🇬 SGD (Singapore Dollar)": "SGD",
+            "🇪🇺 EUR (Euro)": "EUR",
+            "🇦🇺 AUD (Australian Dollar)": "AUD",
+            "🇯🇵 JPY (Japanese Yen)": "JPY"
+        }
+        
+        target_curr_label = st.selectbox("Convert Net Income to:", list(currency_options.keys()))
+        target_code = currency_options[target_curr_label]
+        
+        # Calculate
+        if net > 0:
+            rate, hist_data = get_currency_data(target_code)
+            
+            if rate:
+                converted_val = net * rate
+                st.metric(f"Net Income in {target_code}", f"{target_code} {converted_val:,.2f}", f"Rate: {rate:.4f}")
+                
+                # Chart
+                if hist_data is not None:
+                    fig_rate = px.line(hist_data, y="Close", title=f"MYR to {target_code} (1 Year Trend)", height=250)
+                    fig_rate.update_layout(margin=dict(t=30, b=0, l=0, r=0))
+                    st.plotly_chart(fig_rate, use_container_width=True)
+            else:
+                st.warning("Could not fetch rates. Check internet connection.")
+        else:
+            st.info("Calculate Net Income to see conversion.")
 
     with st.container(border=True):
         if not edited_expenses.empty:
