@@ -7,7 +7,7 @@ import json
 from datetime import datetime
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
-import yfinance as yf # NEW LIBRARY FOR CURRENCY
+import yfinance as yf
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="MY Financial Dashboard", layout="wide", initial_sidebar_state="expanded")
@@ -120,6 +120,72 @@ def delete_rows_from_sheet(worksheet_name, month_year_list):
             ws.clear()
             ws.update([df_clean.columns.values.tolist()] + df_clean.values.tolist())
 
+# --- CURRENCY LOGIC ---
+def convert_value(value, rate):
+    return value * rate
+
+def perform_currency_switch(target_currency):
+    """Converts the entire session state to the new currency."""
+    current_currency = st.session_state.active_currency
+    
+    if current_currency == target_currency:
+        return
+
+    rate = 1.0
+    
+    # 1. Normalize to MYR first (if we are currently in USD/GBP etc)
+    # We need the rate to go BACK to MYR. 
+    # Example: If current is USD, we need USD->MYR rate.
+    if current_currency != "MYR":
+        # Get rate for Current -> MYR
+        ticker = f"{current_currency}MYR=X"
+        try:
+            data = yf.Ticker(ticker).history(period="1d")
+            if not data.empty:
+                to_myr_rate = data['Close'].iloc[-1]
+                # Apply normalization
+                st.session_state.basic_salary *= to_myr_rate
+                st.session_state.allowances *= to_myr_rate
+                st.session_state.variable_income *= to_myr_rate
+                st.session_state.current_savings *= to_myr_rate
+                for exp in st.session_state.expenses: exp['Amount'] *= to_myr_rate
+                for ded in st.session_state.deductions_list: ded['Amount'] *= to_myr_rate
+            else:
+                st.error("Could not fetch rates to normalize currency.")
+                return
+        except:
+            st.error("Currency API Error")
+            return
+
+    # 2. Convert from MYR to Target (if Target is not MYR)
+    if target_currency != "MYR":
+        ticker = f"MYR{target_currency}=X"
+        try:
+            data = yf.Ticker(ticker).history(period="1d")
+            if not data.empty:
+                to_target_rate = data['Close'].iloc[-1]
+                # Apply conversion
+                st.session_state.basic_salary *= to_target_rate
+                st.session_state.allowances *= to_target_rate
+                st.session_state.variable_income *= to_target_rate
+                st.session_state.current_savings *= to_target_rate
+                for exp in st.session_state.expenses: exp['Amount'] *= to_target_rate
+                for ded in st.session_state.deductions_list: ded['Amount'] *= to_target_rate
+            else:
+                st.error("Could not fetch target rates.")
+                return
+        except:
+            st.error("Currency API Error")
+            return
+
+    # 3. Update Sync Helpers & State
+    st.session_state.loaded_salary = st.session_state.basic_salary
+    st.session_state.loaded_allowances = st.session_state.allowances
+    st.session_state.loaded_var = st.session_state.variable_income
+    st.session_state.loaded_savings = st.session_state.current_savings
+    st.session_state.active_currency = target_currency
+    st.rerun()
+
 # --- CLOUD SYNC FUNCTIONS ---
 def save_cloud_state():
     state_data = {
@@ -133,6 +199,7 @@ def save_cloud_state():
         "epf_rate": st.session_state.get('epf_rate', 11),
         "month_select": st.session_state.get('month_select', "December"),
         "year_input": st.session_state.get('year_input', datetime.now().year),
+        "currency": st.session_state.get('active_currency', "MYR") # Save Currency
     }
     client = get_google_sheet_client()
     if client:
@@ -154,25 +221,6 @@ def load_cloud_state():
         except: return None
     return None
 
-# --- CURRENCY HELPER ---
-@st.cache_data(ttl=3600) # Cache for 1 hour to save speed
-def get_currency_data(target_currency_code):
-    """Fetches MYR to Target Currency data."""
-    try:
-        # Yahoo Finance Ticker Format: MYRUSD=X
-        ticker_symbol = f"MYR{target_currency_code}=X"
-        ticker = yf.Ticker(ticker_symbol)
-        
-        # Get historical data for chart (1 year)
-        hist = ticker.history(period="1y")
-        
-        # Get current rate (last close)
-        current_rate = hist['Close'].iloc[-1]
-        
-        return current_rate, hist
-    except Exception as e:
-        return None, None
-
 # --- INITIALIZATION ---
 if 'data_loaded' not in st.session_state:
     cloud_state = load_cloud_state()
@@ -188,6 +236,7 @@ if 'data_loaded' not in st.session_state:
         st.session_state.loaded_epf = int(cloud_state.get('epf_rate', defaults['epf_rate']))
         st.session_state.loaded_month = cloud_state.get('month_select', "December")
         st.session_state.loaded_year = int(cloud_state.get('year_input', datetime.now().year))
+        st.session_state.active_currency = cloud_state.get('currency', "MYR")
     else:
         st.session_state.expenses = defaults['expenses']
         st.session_state.deductions_list = defaults['deductions']
@@ -198,6 +247,7 @@ if 'data_loaded' not in st.session_state:
         st.session_state.loaded_epf = defaults['epf_rate']
         st.session_state.loaded_month = "December"
         st.session_state.loaded_year = datetime.now().year
+        st.session_state.active_currency = "MYR"
     
     st.session_state.last_viewed_month = st.session_state.loaded_month
     st.session_state.last_viewed_year = st.session_state.loaded_year
@@ -208,6 +258,8 @@ if 'last_viewed_month' not in st.session_state:
     st.session_state.last_viewed_month = st.session_state.get('loaded_month', "December")
 if 'last_viewed_year' not in st.session_state:
     st.session_state.last_viewed_year = st.session_state.get('loaded_year', datetime.now().year)
+if 'active_currency' not in st.session_state:
+    st.session_state.active_currency = "MYR"
 
 if 'available_models' not in st.session_state:
     st.session_state.available_models = ["gemini-1.5-flash", "gemini-2.0-flash-exp"]
@@ -225,6 +277,21 @@ with st.sidebar:
             st.link_button("📂 Open Google Database", st.secrets["SHEET_URL"])
     else: 
         st.error("Missing Google Cloud Credentials.")
+
+    st.divider()
+    
+    # --- NEW: GLOBAL CURRENCY SWITCHER ---
+    st.markdown("### 💱 Global Currency")
+    currency_options = ["MYR", "USD", "GBP", "SGD", "EUR", "AUD", "JPY"]
+    selected_currency = st.selectbox(
+        "Display All Data In:", 
+        currency_options, 
+        index=currency_options.index(st.session_state.active_currency) if st.session_state.active_currency in currency_options else 0
+    )
+    
+    if selected_currency != st.session_state.active_currency:
+        with st.spinner(f"Converting entire dashboard to {selected_currency}..."):
+            perform_currency_switch(selected_currency)
 
     st.divider()
     st.markdown("### ☁️ Cross-Device Sync")
@@ -249,6 +316,7 @@ with st.sidebar:
                     st.session_state["year_input"] = int(cloud_state.get('year_input', datetime.now().year))
                     st.session_state.expenses = json.loads(cloud_state.get('expenses', '[]'))
                     st.session_state.deductions_list = json.loads(cloud_state.get('deductions', '[]'))
+                    st.session_state["active_currency"] = cloud_state.get('currency', "MYR") # Load Currency
                     
                     st.session_state.loaded_salary = st.session_state["basic_salary"]
                     st.session_state.loaded_allowances = st.session_state["allowances"]
@@ -309,9 +377,11 @@ with st.sidebar:
 # --- MAIN LAYOUT ---
 col_left, col_right = st.columns([1, 1.5], gap="large")
 
+curr = st.session_state.active_currency
+
 with col_left:
     with st.container(border=True):
-        st.subheader("📅 Period & Income")
+        st.subheader(f"📅 Period & Income ({curr})")
         d_col1, d_col2 = st.columns(2)
         months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
         
@@ -341,6 +411,7 @@ with col_left:
                     st.session_state["epf_rate"] = int(found_record.get('EPF_Rate', 11))
                     st.session_state.expenses = json.loads(found_record.get('Expenses_JSON', '[]'))
                     st.session_state.deductions_list = json.loads(found_record.get('Deductions_JSON', '[]'))
+                    st.session_state["active_currency"] = found_record.get('Currency', "MYR") # Load Saved Currency
                     st.toast(f"📂 Loaded {selected_month} {selected_year}", icon="✅")
                 else:
                     # RESET
@@ -352,6 +423,7 @@ with col_left:
                     st.session_state["epf_rate"] = defaults['epf_rate']
                     st.session_state.expenses = defaults['expenses']
                     st.session_state.deductions_list = defaults['deductions']
+                    st.session_state["active_currency"] = "MYR" # Default to MYR on reset
                     st.toast(f"✨ New Month: {selected_month} {selected_year}", icon="🆕")
 
                 st.session_state.loaded_salary = st.session_state["basic_salary"]
@@ -364,32 +436,32 @@ with col_left:
                 st.rerun()
 
         st.divider()
-        current_savings = st.number_input("Current Savings", value=st.session_state.loaded_savings, step=1000.0, key="current_savings")
+        current_savings = st.number_input(f"Current Savings ({curr})", value=st.session_state.loaded_savings, step=1000.0, key="current_savings")
         c1, c2 = st.columns(2)
-        basic_salary = c1.number_input("Basic Salary", value=st.session_state.loaded_salary, key="basic_salary")
-        allowances = c1.number_input("Basic Allowances", value=st.session_state.loaded_allowances, key="allowances")
-        variable_income = c2.number_input("Side Income", value=st.session_state.loaded_var, key="variable_income")
+        basic_salary = c1.number_input(f"Basic Salary ({curr})", value=st.session_state.loaded_salary, key="basic_salary")
+        allowances = c1.number_input(f"Allowances ({curr})", value=st.session_state.loaded_allowances, key="allowances")
+        variable_income = c2.number_input(f"Side Income ({curr})", value=st.session_state.loaded_var, key="variable_income")
 
     with st.container(border=True):
-        st.subheader("📉 Statutory Deductions")
+        st.subheader(f"📉 Statutory Deductions ({curr})")
         epf_rate = st.slider("EPF Rate (%)", 0, 20, st.session_state.loaded_epf, key="epf_rate") 
         epf_amount = (basic_salary + allowances) * (epf_rate / 100)
-        st.markdown(f"**EPF Amount:** RM {epf_amount:.2f}")
+        st.markdown(f"**EPF Amount:** {curr} {epf_amount:.2f}")
         st.divider()
         st.caption("Other Deductions")
         df_deductions_input = pd.DataFrame(st.session_state.deductions_list)
-        edited_deductions = st.data_editor(df_deductions_input, num_rows="dynamic", use_container_width=True, key="deductions_editor", column_config={"Category": st.column_config.TextColumn("Deduction Name"), "Amount": st.column_config.NumberColumn("Amount (RM)", format="%.2f")})
+        edited_deductions = st.data_editor(df_deductions_input, num_rows="dynamic", use_container_width=True, key="deductions_editor", column_config={"Category": st.column_config.TextColumn("Deduction Name"), "Amount": st.column_config.NumberColumn(f"Amount ({curr})", format="%.2f")})
         st.session_state.deductions_list = edited_deductions.to_dict('records')
         total_deductions = epf_amount + (edited_deductions['Amount'].sum() if not edited_deductions.empty else 0)
-        st.markdown(f"#### Total Deducted: <span style='color:#e74c3c'>RM {total_deductions:.2f}</span>", unsafe_allow_html=True)
+        st.markdown(f"#### Total Deducted: <span style='color:#e74c3c'>{curr} {total_deductions:.2f}</span>", unsafe_allow_html=True)
 
     with st.container(border=True):
-        st.subheader("🧾 Living Expenses")
+        st.subheader(f"🧾 Living Expenses ({curr})")
         df_expenses_input = pd.DataFrame(st.session_state.expenses)
-        edited_expenses = st.data_editor(df_expenses_input, num_rows="dynamic", use_container_width=True, key="expenses_editor", column_config={"Category": st.column_config.TextColumn("Expense Category"), "Amount": st.column_config.NumberColumn("Amount (RM)", format="%.2f")})
+        edited_expenses = st.data_editor(df_expenses_input, num_rows="dynamic", use_container_width=True, key="expenses_editor", column_config={"Category": st.column_config.TextColumn("Expense Category"), "Amount": st.column_config.NumberColumn(f"Amount ({curr})", format="%.2f")})
         st.session_state.expenses = edited_expenses.to_dict('records')
         total_living_expenses = edited_expenses['Amount'].sum() if not edited_expenses.empty else 0.0
-        st.markdown(f"#### Total Expenses: <span style='color:#e74c3c'>RM {total_living_expenses:.2f}</span>", unsafe_allow_html=True)
+        st.markdown(f"#### Total Expenses: <span style='color:#e74c3c'>{curr} {total_living_expenses:.2f}</span>", unsafe_allow_html=True)
 
 with col_right:
     gross = basic_salary + allowances + variable_income
@@ -399,47 +471,27 @@ with col_right:
 
     st.markdown(f"### Snapshot: {selected_month} {selected_year}")
     c1, c2 = st.columns(2)
-    with c1: st.metric("Net Disposable", f"RM {net:.2f}")
-    with c2: st.metric("Monthly Surplus", f"RM {balance:.2f}", delta=f"{balance:.2f}")
+    with c1: st.metric("Net Disposable", f"{curr} {net:.2f}")
+    with c2: st.metric("Monthly Surplus", f"{curr} {balance:.2f}", delta=f"{balance:.2f}")
 
-    # --- NEW: CURRENCY CONVERTER ---
-    with st.container(border=True):
-        st.subheader("💱 Real-Time Exchange")
-        
-        # Currency Dictionary
-        currency_options = {
-            "🇺🇸 USD (US Dollar)": "USD",
-            "🇬🇧 GBP (British Pound)": "GBP",
-            "🇸🇬 SGD (Singapore Dollar)": "SGD",
-            "🇪🇺 EUR (Euro)": "EUR",
-            "🇦🇺 AUD (Australian Dollar)": "AUD",
-            "🇯🇵 JPY (Japanese Yen)": "JPY"
-        }
-        
-        target_curr_label = st.selectbox("Convert Net Income to:", list(currency_options.keys()))
-        target_code = currency_options[target_curr_label]
-        
-        # Calculate
-        if net > 0:
-            rate, hist_data = get_currency_data(target_code)
-            
-            if rate:
-                converted_val = net * rate
-                st.metric(f"Net Income in {target_code}", f"{target_code} {converted_val:,.2f}", f"Rate: {rate:.4f}")
-                
-                # Chart
-                if hist_data is not None:
-                    fig_rate = px.line(hist_data, y="Close", title=f"MYR to {target_code} (1 Year Trend)", height=250)
+    # --- CURRENCY CHART (RATE TRACKER) ---
+    if curr != "MYR":
+        with st.container(border=True):
+            st.subheader(f"💱 Exchange Rate: MYR to {curr}")
+            ticker_name = f"MYR{curr}=X"
+            try:
+                hist = yf.Ticker(ticker_name).history(period="1y")
+                if not hist.empty:
+                    current_rate = hist['Close'].iloc[-1]
+                    st.metric(f"1 MYR = {current_rate:.4f} {curr}", "")
+                    fig_rate = px.line(hist, y="Close", title="1 Year Trend", height=200)
                     fig_rate.update_layout(margin=dict(t=30, b=0, l=0, r=0))
                     st.plotly_chart(fig_rate, use_container_width=True)
-            else:
-                st.warning("Could not fetch rates. Check internet connection.")
-        else:
-            st.info("Calculate Net Income to see conversion.")
+            except: st.warning("Chart unavailble")
 
     with st.container(border=True):
         if not edited_expenses.empty:
-            fig = px.pie(edited_expenses, values='Amount', names='Category', hole=0.5, title="Expense Breakdown")
+            fig = px.pie(edited_expenses, values='Amount', names='Category', hole=0.5, title=f"Expense Breakdown ({curr})")
             fig.update_layout(height=300, margin=dict(t=30, b=0, l=0, r=0))
             st.plotly_chart(fig, use_container_width=True)
 
@@ -484,7 +536,8 @@ with col_right:
             "Balance": balance, "EPF_Savings": epf_amount, "Basic_Salary": basic_salary, 
             "Allowances": allowances, "Variable_Income": variable_income, "Current_Savings": current_savings, 
             "EPF_Rate": epf_rate, "Expenses_JSON": json.dumps(st.session_state.expenses), 
-            "Deductions_JSON": json.dumps(st.session_state.deductions_list)
+            "Deductions_JSON": json.dumps(st.session_state.deductions_list),
+            "Currency": curr # SAVING THE CURRENCY
         }
         
         with db_col1:
@@ -526,6 +579,7 @@ with col_right:
                         st.session_state["epf_rate"] = int(row.get('EPF_Rate', 11))
                         st.session_state.expenses = json.loads(row.get('Expenses_JSON', '[]'))
                         st.session_state.deductions_list = json.loads(row.get('Deductions_JSON', '[]'))
+                        st.session_state["active_currency"] = row.get('Currency', "MYR") # LOAD CURRENCY
                         
                         # Sync helpers
                         st.session_state.loaded_month = row['Month']
@@ -572,11 +626,11 @@ with col_right:
             else:
                 try:
                     client = genai.Client(api_key=api_key)
-                    deduction_txt = "\n".join([f"- {x['Category']}: RM {x['Amount']}" for x in st.session_state.deductions_list])
-                    exp_txt = "\n".join([f"- {x['Category']}: RM {x['Amount']}" for x in st.session_state.expenses])
+                    deduction_txt = "\n".join([f"- {x['Category']}: {curr} {x['Amount']}" for x in st.session_state.deductions_list])
+                    exp_txt = "\n".join([f"- {x['Category']}: {curr} {x['Amount']}" for x in st.session_state.expenses])
                     prompt = f"""Role: Expert Malaysian Financial Planner. Context: {selected_month} {selected_year}.
-                    Stats: Net: RM {net:.2f}, Exp: RM {total_exp:.2f}, Bal: RM {balance:.2f}.
-                    Deductions: EPF: RM {epf_amount:.2f}\n{deduction_txt}
+                    Stats: Net: {curr} {net:.2f}, Exp: {curr} {total_exp:.2f}, Bal: {curr} {balance:.2f}.
+                    Deductions: EPF: {curr} {epf_amount:.2f}\n{deduction_txt}
                     Expenses: {exp_txt}
                     Provide: 1. Leakage Check 2. Tax Reliefs 3. Researcher Analogy."""
                     with st.spinner(f"Asking {selected_auditor_model}..."):
