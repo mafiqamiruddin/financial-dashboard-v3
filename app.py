@@ -10,16 +10,122 @@ from oauth2client.service_account import ServiceAccountCredentials
 import yfinance as yf
 
 # --- PAGE CONFIGURATION ---
-st.set_page_config(page_title="MY Financial Dashboard", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(
+    page_title="FinTwin: Digital Financial Twin", 
+    page_icon="🧬",
+    layout="wide", 
+    initial_sidebar_state="expanded"
+)
 
-# --- CUSTOM CSS ---
+# --- ADVANCED CUSTOM CSS (AESTHETIC & TECH THEME) ---
 st.markdown("""
 <style>
-    .stApp { background-color: #f0f2f6; }
-    .stContainer { background-color: white; padding: 20px; border-radius: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin-bottom: 20px; }
-    [data-testid="stMetricValue"] { font-size: 24px; color: #2c3e50; }
-    .stButton>button { width: 100%; border-radius: 8px; font-weight: bold; }
-    [data-testid="stDataEditor"] { border: 1px solid #e0e0e0; border-radius: 10px; }
+    /* IMPORT GOOGLE FONT INTER */
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+
+    /* GLOBAL STYLES */
+    .stApp {
+        background-color: #f8fafc; /* Very light cool gray */
+        font-family: 'Inter', sans-serif;
+    }
+    
+    /* REMOVE TOP PADDING */
+    .block-container {
+        padding-top: 2rem;
+    }
+
+    /* CARD STYLE CONTAINERS */
+    .stContainer {
+        background-color: #ffffff;
+        border-radius: 16px;
+        padding: 24px;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+        border: 1px solid #f1f5f9;
+        margin-bottom: 24px;
+    }
+
+    /* HEADERS */
+    h1, h2, h3 {
+        color: #0f172a;
+        font-weight: 700;
+        letter-spacing: -0.025em;
+    }
+    
+    h4 {
+        font-weight: 600;
+        color: #334155;
+    }
+
+    /* INPUT FIELDS - CLEANER LOOK */
+    .stTextInput>div>div>input, .stNumberInput>div>div>input, .stSelectbox>div>div>div {
+        border-radius: 8px;
+        border: 1px solid #cbd5e1;
+        color: #334155;
+    }
+
+    /* BUTTONS - TECH STYLE */
+    .stButton>button {
+        width: 100%;
+        border-radius: 10px;
+        font-weight: 600;
+        border: none;
+        padding: 0.6rem 1rem;
+        transition: all 0.2s;
+    }
+    
+    /* Primary Action Buttons */
+    div[data-testid="stVerticalBlock"] > div > div > div > div > button[kind="primary"] {
+        background: linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%);
+        box-shadow: 0 4px 14px 0 rgba(79, 70, 229, 0.39);
+    }
+
+    /* METRICS - BIG & BOLD */
+    [data-testid="stMetricValue"] {
+        font-size: 28px;
+        font-weight: 700;
+        color: #1e293b;
+        font-family: 'Inter', monospace;
+    }
+    [data-testid="stMetricLabel"] {
+        font-size: 14px;
+        font-weight: 600;
+        color: #64748b;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+
+    /* BADGES FOR TOTALS */
+    .total-badge {
+        padding: 8px 12px;
+        border-radius: 8px;
+        font-weight: 600;
+        font-size: 15px;
+        display: inline-block;
+        margin-top: 10px;
+        width: 100%;
+        text-align: center;
+    }
+    .badge-green { background-color: #dcfce7; color: #166534; border: 1px solid #bbf7d0; }
+    .badge-red { background-color: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
+    .badge-blue { background-color: #dbeafe; color: #1e40af; border: 1px solid #bfdbfe; }
+
+    /* AI BOX STYLING */
+    .ai-box {
+        background-color: #1e293b;
+        border-radius: 12px;
+        padding: 20px;
+        color: #e2e8f0;
+        border-left: 4px solid #8b5cf6;
+        font-family: 'Inter', sans-serif;
+        box-shadow: inset 0 2px 4px 0 rgba(0, 0, 0, 0.2);
+    }
+    
+    /* TABLE STYLING */
+    [data-testid="stDataEditor"] {
+        border: 1px solid #e2e8f0;
+        border-radius: 10px;
+        overflow: hidden;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -217,20 +323,14 @@ def load_cloud_state():
     return None
 
 # --- CURRENCY HELPER ---
-@st.cache_data(ttl=3600) # Cache for 1 hour to save speed
+@st.cache_data(ttl=3600) # Cache for 1 hour
 def get_currency_data(target_currency_code):
     """Fetches MYR to Target Currency data."""
     try:
-        # Yahoo Finance Ticker Format: MYRUSD=X
         ticker_symbol = f"MYR{target_currency_code}=X"
         ticker = yf.Ticker(ticker_symbol)
-        
-        # Get historical data for chart (1 year)
         hist = ticker.history(period="1y")
-        
-        # Get current rate (last close)
         current_rate = hist['Close'].iloc[-1]
-        
         return current_rate, hist
     except Exception as e:
         return None, None
@@ -280,47 +380,46 @@ if 'available_models' not in st.session_state:
 
 # --- SIDEBAR ---
 with st.sidebar:
-    st.header("⚙️ Configuration")
+    st.header("⚙️ Settings")
     api_key = st.secrets.get("GEMINI_API_KEY", None)
     if not api_key: api_key = st.text_input("Enter Gemini API Key", type="password")
-    else: st.success("Gemini API Key Connected! 🔒")
+    else: st.success("Gemini Connected 🧠")
     
     if "GCP_CREDENTIALS" in st.secrets: 
-        st.success("Google Sheets Connected! ☁️")
+        st.success("Google Cloud Active ☁️")
         if "SHEET_URL" in st.secrets:
-            st.link_button("📂 Open Google Database", st.secrets["SHEET_URL"])
+            st.link_button("📂 View Database", st.secrets["SHEET_URL"])
     else: 
         st.error("Missing Google Cloud Credentials.")
 
     st.divider()
     
-    # --- NEW: GLOBAL CURRENCY SWITCHER ---
-    st.markdown("### 💱 Global Currency")
+    # --- GLOBAL CURRENCY SWITCHER ---
+    st.markdown("### 💱 Currency")
     currency_options = ["MYR", "USD", "GBP", "SGD", "EUR", "AUD", "JPY"]
     selected_currency = st.selectbox(
-        "Display All Data In:", 
+        "Dashboard Currency", 
         currency_options, 
         index=currency_options.index(st.session_state.active_currency) if st.session_state.active_currency in currency_options else 0
     )
     
     if selected_currency != st.session_state.active_currency:
-        with st.spinner(f"Converting entire dashboard to {selected_currency}..."):
+        with st.spinner(f"Converting dashboard to {selected_currency}..."):
             perform_currency_switch(selected_currency)
 
     st.divider()
-    st.markdown("### ☁️ Cross-Device Sync")
+    st.markdown("### ☁️ Sync")
     col_sync1, col_sync2 = st.columns(2)
     with col_sync1:
-        if st.button("⬆️ Upload Draft"):
+        if st.button("⬆️ Upload"):
             with st.spinner("Syncing..."):
                 save_cloud_state()
             st.success("Uploaded!")
     with col_sync2:
-        if st.button("⬇️ Pull Draft"):
+        if st.button("⬇️ Pull"):
             with st.spinner("Downloading..."):
                 cloud_state = load_cloud_state()
                 if cloud_state:
-                    # Direct update via callback-like logic
                     st.session_state["basic_salary"] = float(cloud_state.get('basic_salary', 0.0))
                     st.session_state["allowances"] = float(cloud_state.get('allowances', 0.0))
                     st.session_state["variable_income"] = float(cloud_state.get('variable_income', 0.0))
@@ -330,7 +429,7 @@ with st.sidebar:
                     st.session_state["year_input"] = int(cloud_state.get('year_input', datetime.now().year))
                     st.session_state.expenses = json.loads(cloud_state.get('expenses', '[]'))
                     st.session_state.deductions_list = json.loads(cloud_state.get('deductions', '[]'))
-                    st.session_state["active_currency"] = cloud_state.get('currency', "MYR") # Load Currency
+                    st.session_state["active_currency"] = cloud_state.get('currency', "MYR")
                     
                     st.session_state.loaded_salary = st.session_state["basic_salary"]
                     st.session_state.loaded_allowances = st.session_state["allowances"]
@@ -345,14 +444,14 @@ with st.sidebar:
             st.success("Updated!")
 
     st.divider()
-    with st.expander("🤖 AI Auto-Fill (Magic)"):
-        selected_fill_model = st.selectbox("Select Model", st.session_state.available_models, index=0, key="fill_model_select")
-        user_persona = st.text_area("Scenario:", placeholder="e.g., Senior Lecturer in KL", height=70)
+    with st.expander("🤖 Magic Auto-Fill"):
+        selected_fill_model = st.selectbox("Model", st.session_state.available_models, index=0, key="fill_model_select")
+        user_persona = st.text_area("Scenario", placeholder="e.g., Senior Lecturer in KL...", height=70)
         
-        if st.button("✨ Fill Dashboard"):
+        if st.button("✨ Generate Profile"):
             if not api_key: st.error("API Key required.")
             else:
-                with st.spinner(f"Generating..."):
+                with st.spinner(f"Creating Digital Twin..."):
                     try:
                         client = genai.Client(api_key=api_key)
                         prompt = f"""You are a Data Entry API. Persona: "{user_persona}". 
@@ -378,7 +477,7 @@ with st.sidebar:
 
     # --- RESTORED BUTTON ---
     st.divider()
-    if st.button("🛠️ Check Available Models"):
+    if st.button("🛠️ Check AI Models"):
         if not api_key: st.error("API Key required.")
         else:
             try:
@@ -389,27 +488,28 @@ with st.sidebar:
             except Exception as e: st.error(f"Error: {e}")
 
 # --- MAIN LAYOUT ---
-col_left, col_right = st.columns([1, 1.5], gap="large")
+st.title("🧬 FinTwin: Financial Digital Twin")
+st.markdown("---")
+
+col_left, col_right = st.columns([1, 1.2], gap="large")
 
 curr = st.session_state.active_currency
 
 with col_left:
-    with st.container(border=True):
+    # --- PERIOD & INCOME ---
+    with st.container():
         st.subheader(f"📅 Period & Income ({curr})")
         d_col1, d_col2 = st.columns(2)
         months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
         
-        # Determine index based on current loaded state
         try: def_idx = months.index(st.session_state.loaded_month)
         except: def_idx = 0
         
-        # WIDGETS
         selected_month = d_col1.selectbox("Month", months, index=def_idx, key="month_select")
         selected_year = d_col2.number_input("Year", min_value=2020, max_value=2030, value=st.session_state.loaded_year, key="year_input")
         
-        # WATCHER: Check if user manually changed Month/Year
         if (selected_month != st.session_state.last_viewed_month) or (selected_year != st.session_state.last_viewed_year):
-            with st.spinner(f"Checking records..."):
+            with st.spinner(f"Syncing records..."):
                 df_history = get_sheet_data("History")
                 found_record = None
                 if not df_history.empty and 'Month' in df_history.columns and 'Year' in df_history.columns:
@@ -417,7 +517,6 @@ with col_left:
                      if mask.any(): found_record = df_history[mask].iloc[0]
                 
                 if found_record is not None and 'Expenses_JSON' in found_record:
-                    # LOAD
                     st.session_state["basic_salary"] = float(found_record.get('Basic_Salary', 0))
                     st.session_state["allowances"] = float(found_record.get('Allowances', 0))
                     st.session_state["variable_income"] = float(found_record.get('Variable_Income', 0))
@@ -425,10 +524,9 @@ with col_left:
                     st.session_state["epf_rate"] = int(found_record.get('EPF_Rate', 11))
                     st.session_state.expenses = json.loads(found_record.get('Expenses_JSON', '[]'))
                     st.session_state.deductions_list = json.loads(found_record.get('Deductions_JSON', '[]'))
-                    st.session_state["active_currency"] = found_record.get('Currency', "MYR") # Load Saved Currency
-                    st.toast(f"📂 Loaded {selected_month} {selected_year}", icon="✅")
+                    st.session_state["active_currency"] = found_record.get('Currency', "MYR")
+                    st.toast(f"Data Loaded: {selected_month} {selected_year}", icon="✅")
                 else:
-                    # RESET
                     defaults = get_default_state()
                     st.session_state["basic_salary"] = defaults['basic_salary']
                     st.session_state["allowances"] = defaults['allowances']
@@ -437,8 +535,8 @@ with col_left:
                     st.session_state["epf_rate"] = defaults['epf_rate']
                     st.session_state.expenses = defaults['expenses']
                     st.session_state.deductions_list = defaults['deductions']
-                    st.session_state["active_currency"] = "MYR" # Default to MYR on reset
-                    st.toast(f"✨ New Month: {selected_month} {selected_year}", icon="🆕")
+                    st.session_state["active_currency"] = "MYR"
+                    st.toast(f"New Period: {selected_month} {selected_year}", icon="✨")
 
                 st.session_state.loaded_salary = st.session_state["basic_salary"]
                 st.session_state.loaded_allowances = st.session_state["allowances"]
@@ -456,30 +554,30 @@ with col_left:
         allowances = c1.number_input(f"Allowances ({curr})", value=st.session_state.loaded_allowances, key="allowances")
         variable_income = c2.number_input(f"Side Income ({curr})", value=st.session_state.loaded_var, key="variable_income")
         
-        # --- NEW: TOTAL GROSS INCOME ---
         total_gross = basic_salary + allowances + variable_income
-        st.markdown(f"#### Total Gross Income: <span style='color:#2ecc71'>{curr} {total_gross:,.2f}</span>", unsafe_allow_html=True)
+        st.markdown(f"<div class='total-badge badge-green'>Total Gross Income: {curr} {total_gross:,.2f}</div>", unsafe_allow_html=True)
 
-    with st.container(border=True):
-        st.subheader(f"📉 Statutory Deductions ({curr})")
+    # --- DEDUCTIONS ---
+    with st.container():
+        st.subheader(f"📉 Deductions ({curr})")
         epf_rate = st.slider("EPF Rate (%)", 0, 20, st.session_state.loaded_epf, key="epf_rate") 
         epf_amount = (basic_salary + allowances) * (epf_rate / 100)
-        st.markdown(f"**EPF Amount:** {curr} {epf_amount:.2f}")
-        st.divider()
-        st.caption("Other Deductions")
+        st.info(f"EPF Contribution: {curr} {epf_amount:.2f}")
+        
         df_deductions_input = pd.DataFrame(st.session_state.deductions_list)
         edited_deductions = st.data_editor(df_deductions_input, num_rows="dynamic", use_container_width=True, key="deductions_editor", column_config={"Category": st.column_config.TextColumn("Deduction Name"), "Amount": st.column_config.NumberColumn(f"Amount ({curr})", format="%.2f")})
         st.session_state.deductions_list = edited_deductions.to_dict('records')
         total_deductions = epf_amount + (edited_deductions['Amount'].sum() if not edited_deductions.empty else 0)
-        st.markdown(f"#### Total Deducted: <span style='color:#e74c3c'>{curr} {total_deductions:.2f}</span>", unsafe_allow_html=True)
+        st.markdown(f"<div class='total-badge badge-red'>Total Deducted: {curr} {total_deductions:,.2f}</div>", unsafe_allow_html=True)
 
-    with st.container(border=True):
-        st.subheader(f"🧾 Living Expenses ({curr})")
+    # --- EXPENSES ---
+    with st.container():
+        st.subheader(f"🧾 Expenses ({curr})")
         df_expenses_input = pd.DataFrame(st.session_state.expenses)
         edited_expenses = st.data_editor(df_expenses_input, num_rows="dynamic", use_container_width=True, key="expenses_editor", column_config={"Category": st.column_config.TextColumn("Expense Category"), "Amount": st.column_config.NumberColumn(f"Amount ({curr})", format="%.2f")})
         st.session_state.expenses = edited_expenses.to_dict('records')
         total_living_expenses = edited_expenses['Amount'].sum() if not edited_expenses.empty else 0.0
-        st.markdown(f"#### Total Expenses: <span style='color:#e74c3c'>{curr} {total_living_expenses:.2f}</span>", unsafe_allow_html=True)
+        st.markdown(f"<div class='total-badge badge-blue'>Total Expenses: {curr} {total_living_expenses:,.2f}</div>", unsafe_allow_html=True)
 
 with col_right:
     gross = basic_salary + allowances + variable_income
@@ -487,44 +585,46 @@ with col_right:
     total_exp = edited_expenses['Amount'].sum() if not edited_expenses.empty else 0
     balance = net - total_exp
 
-    st.markdown(f"### Snapshot: {selected_month} {selected_year}")
-    c1, c2 = st.columns(2)
-    with c1: st.metric("Net Disposable", f"{curr} {net:.2f}")
-    with c2: st.metric("Monthly Surplus", f"{curr} {balance:.2f}", delta=f"{balance:.2f}")
+    # --- SNAPSHOT HERO CARD ---
+    with st.container():
+        st.markdown(f"### 📊 Snapshot: {selected_month} {selected_year}")
+        c1, c2 = st.columns(2)
+        c1.metric("Net Disposable", f"{curr} {net:,.2f}")
+        c2.metric("Monthly Surplus", f"{curr} {balance:,.2f}", delta=f"{balance:,.2f}")
 
-    # --- CURRENCY CHART (RATE TRACKER) ---
+    # --- CURRENCY CHART ---
     if curr != "MYR":
-        with st.container(border=True):
-            st.subheader(f"💱 Exchange Rate: MYR to {curr}")
+        with st.container():
+            st.subheader(f"💱 MYR to {curr} Trend")
             ticker_name = f"MYR{curr}=X"
             try:
                 hist = yf.Ticker(ticker_name).history(period="1y")
                 if not hist.empty:
                     current_rate = hist['Close'].iloc[-1]
-                    st.metric(f"1 MYR = {current_rate:.4f} {curr}", "")
-                    fig_rate = px.line(hist, y="Close", title="1 Year Trend", height=200)
-                    fig_rate.update_layout(margin=dict(t=30, b=0, l=0, r=0))
+                    st.caption(f"Live Rate: 1 MYR = {current_rate:.4f} {curr}")
+                    fig_rate = px.line(hist, y="Close", height=200)
+                    fig_rate.update_layout(margin=dict(t=10, b=0, l=0, r=0), yaxis_title=None, xaxis_title=None)
                     st.plotly_chart(fig_rate, use_container_width=True)
-            except: st.warning("Chart unavailble")
+            except: st.warning("Chart unavailable")
 
-    with st.container(border=True):
+    with st.container():
         if not edited_expenses.empty:
-            fig = px.pie(edited_expenses, values='Amount', names='Category', hole=0.5, title=f"Expense Breakdown ({curr})")
+            fig = px.pie(edited_expenses, values='Amount', names='Category', hole=0.6, title=f"Spending Breakdown")
             fig.update_layout(height=300, margin=dict(t=30, b=0, l=0, r=0))
             st.plotly_chart(fig, use_container_width=True)
 
-    with st.container(border=True):
+    with st.container():
         t_col1, t_col2 = st.columns([3, 1])
         t_col1.subheader("📈 Wealth Projection")
-        duration_option = t_col2.selectbox("Projection", ["1 Year", "3 Years", "5 Years", "10 Years"], index=1)
+        duration_option = t_col2.selectbox("Duration", ["1 Year", "3 Years", "5 Years", "10 Years"], index=1)
         duration_map = {"1 Year": 12, "3 Years": 36, "5 Years": 60, "10 Years": 120}
         months_to_project = duration_map[duration_option]
         years_count = months_to_project // 12
         
-        t_col2.caption("Inflation Adjust:")
-        default_rates = [{"Year": i+1, "Inflation (%)": 3.0} for i in range(years_count)]
-        edited_rates = t_col2.data_editor(pd.DataFrame(default_rates), hide_index=True, use_container_width=True)
-        yearly_rates_list = [x / 100 for x in edited_rates["Inflation (%)"].tolist()]
+        t_col2.caption("Inflation %")
+        default_rates = [{"Year": i+1, "Inflation": 3.0} for i in range(years_count)]
+        edited_rates = t_col2.data_editor(pd.DataFrame(default_rates), hide_index=True, use_container_width=True, column_config={"Inflation": st.column_config.NumberColumn(format="%.1f")})
+        yearly_rates_list = [x / 100 for x in edited_rates["Inflation"].tolist()]
 
         future = []
         acc = current_savings
@@ -544,7 +644,7 @@ with col_right:
         t_col1.plotly_chart(fig2, use_container_width=True)
 
     # --- CLOUD DATABASE ---
-    with st.container(border=True):
+    with st.container():
         st.subheader("☁️ Cloud Database")
         db_col1, db_col2 = st.columns(2)
         
@@ -555,14 +655,14 @@ with col_right:
             "Allowances": allowances, "Variable_Income": variable_income, "Current_Savings": current_savings, 
             "EPF_Rate": epf_rate, "Expenses_JSON": json.dumps(st.session_state.expenses), 
             "Deductions_JSON": json.dumps(st.session_state.deductions_list),
-            "Currency": curr # SAVING THE CURRENCY
+            "Currency": curr 
         }
         
         with db_col1:
-            if st.button(f"Save {selected_month} {selected_year} Record"):
-                with st.spinner("Saving full record..."):
+            if st.button(f"Save Record ({selected_month})", type="primary"):
+                with st.spinner("Saving..."):
                     save_row_to_history(current_data)
-                    st.success("Record Saved!")
+                    st.success("Saved!")
                     st.session_state.last_viewed_month = selected_month
                     st.rerun()
 
@@ -572,22 +672,14 @@ with col_right:
             df_hist['Label'] = df_hist['Month'] + " " + df_hist['Year'].astype(str)
             c_load, c_del = st.columns(2)
             
-            # 1. LOAD RECORD (FIXED WITH CALLBACK)
             with c_load:
-                st.caption("📂 Load / Jump to Record")
-                # Dropdown to select record
-                st.selectbox("Select Record", df_hist['Label'].unique(), index=None, placeholder="Choose...", key="loader_box")
-                
-                # CALLBACK FUNCTION
+                record_to_load = st.selectbox("Select Record", df_hist['Label'].unique(), index=None, placeholder="Load past data...", key="loader_box")
                 def load_record_callback():
                     record_label = st.session_state.loader_box
                     if record_label:
-                        # Fetch fresh data
                         df = get_sheet_data("History")
                         df['Label'] = df['Month'] + " " + df['Year'].astype(str)
                         row = df[df['Label'] == record_label].iloc[0]
-                        
-                        # FORCE UPDATE SESSION STATE (Bypasses the "static" issue)
                         st.session_state["month_select"] = row['Month']
                         st.session_state["year_input"] = int(row['Year'])
                         st.session_state["basic_salary"] = float(row.get('Basic_Salary', 0))
@@ -597,9 +689,7 @@ with col_right:
                         st.session_state["epf_rate"] = int(row.get('EPF_Rate', 11))
                         st.session_state.expenses = json.loads(row.get('Expenses_JSON', '[]'))
                         st.session_state.deductions_list = json.loads(row.get('Deductions_JSON', '[]'))
-                        st.session_state["active_currency"] = row.get('Currency', "MYR") # LOAD CURRENCY
-                        
-                        # Sync helpers
+                        st.session_state["active_currency"] = row.get('Currency', "MYR")
                         st.session_state.loaded_month = row['Month']
                         st.session_state.loaded_year = int(row['Year'])
                         st.session_state.loaded_salary = float(row.get('Basic_Salary', 0))
@@ -607,51 +697,44 @@ with col_right:
                         st.session_state.loaded_var = float(row.get('Variable_Income', 0))
                         st.session_state.loaded_savings = float(row.get('Current_Savings', 0))
                         st.session_state.loaded_epf = int(row.get('EPF_Rate', 11))
-                        
-                        # Prevent watcher loop
                         st.session_state.last_viewed_month = row['Month']
                         st.session_state.last_viewed_year = int(row['Year'])
                         st.toast(f"Jumped to {record_label}!", icon="🚀")
-
                 st.button("Load Record", on_click=load_record_callback)
 
-            # 2. DELETE RECORD
             with c_del:
-                st.caption("🗑️ Delete Record")
-                to_delete = st.multiselect("Select Record", df_hist['Label'].unique(), key="deleter_box")
+                to_delete = st.multiselect("Select Record", df_hist['Label'].unique(), key="deleter_box", label_visibility="hidden")
                 if st.button("Delete Selected"):
                     if to_delete:
                         delete_rows_from_sheet("History", to_delete)
                         st.success("Deleted!")
                         st.rerun()
 
-            st.caption("History Trend")
             if 'Date' in df_hist.columns:
                 df_hist['Date'] = pd.to_datetime(df_hist['Date'])
-                fig_hist = px.line(df_hist.sort_values('Date'), x='Date', y=['Net_Income', 'Balance'], markers=True, height=250)
+                fig_hist = px.area(df_hist.sort_values('Date'), x='Date', y=['Net_Income', 'Balance'], markers=True, height=200)
                 st.plotly_chart(fig_hist, use_container_width=True)
         else:
-            st.info("No history found in Cloud.")
+            st.info("No history found.")
 
     # --- AI AUDITOR ---
     st.markdown("###")
     with st.container():
-        st.markdown("""<div style="background-color: #0f172a; padding: 20px; border-radius: 10px; color: white; border: 1px solid #334155; margin-bottom: 10px;">
-            <h3 style="margin:0;">✨ AI Financial Auditor</h3></div>""", unsafe_allow_html=True)
-        selected_auditor_model = st.selectbox("Select AI Model", st.session_state.available_models, key="auditor_model_select")
-        if st.button("🚀 Generate Analysis", type="primary"):
+        st.markdown("""<div class='ai-box'><h3>🤖 AI Financial Auditor</h3></div>""", unsafe_allow_html=True)
+        selected_auditor_model = st.selectbox("Select Model", st.session_state.available_models, key="auditor_model_select")
+        if st.button("🚀 Analyze Portfolio", type="primary"):
             if not api_key: st.warning("API Key required.")
             else:
                 try:
                     client = genai.Client(api_key=api_key)
                     deduction_txt = "\n".join([f"- {x['Category']}: {curr} {x['Amount']}" for x in st.session_state.deductions_list])
                     exp_txt = "\n".join([f"- {x['Category']}: {curr} {x['Amount']}" for x in st.session_state.expenses])
-                    prompt = f"""Role: Expert Malaysian Financial Planner. Context: {selected_month} {selected_year}.
+                    prompt = f"""Role: Expert Financial Planner. Context: {selected_month} {selected_year}.
                     Stats: Net: {curr} {net:.2f}, Exp: {curr} {total_exp:.2f}, Bal: {curr} {balance:.2f}.
                     Deductions: EPF: {curr} {epf_amount:.2f}\n{deduction_txt}
                     Expenses: {exp_txt}
-                    Provide: 1. Leakage Check 2. Tax Reliefs 3. Researcher Analogy."""
-                    with st.spinner(f"Asking {selected_auditor_model}..."):
+                    Provide: 1. Leakage Check 2. Tax Reliefs 3. Strategic Advice."""
+                    with st.spinner(f"AI is analyzing your finances..."):
                         response = client.models.generate_content(model=selected_auditor_model, contents=prompt)
-                        st.markdown(f"""<div style="background-color: #1e293b; padding: 20px; border-radius: 10px; color: #e2e8f0; border-left: 5px solid #8b5cf6;">{response.text}</div>""", unsafe_allow_html=True)
+                        st.markdown(f"""<div class='ai-box'>{response.text}</div>""", unsafe_allow_html=True)
                 except Exception as e: st.error(f"Error: {e}")
