@@ -9,7 +9,7 @@ from datetime import datetime
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import yfinance as yf
-from PIL import Image # NEW IMPORT FOR IMAGE PROCESSING
+from PIL import Image
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(
@@ -506,11 +506,13 @@ with col_left:
     with st.container():
         st.subheader(f"🧾 Expenses ({curr})")
         
-        # --- NEW: RECEIPT SCANNER SECTION ---
+        # --- RECEIPT SCANNER WITH MODEL SELECTOR ---
         with st.expander("📸 Scan Receipt (AI)", expanded=False):
             st.caption("Upload a receipt or use your camera. AI will extract items.")
             
-            # 1. Dual Input: Camera or File
+            # Model Selector for Receipt
+            rec_model_name = st.selectbox("Vision Model", st.session_state.available_models, index=0, key="receipt_model_select")
+            
             col_cam, col_file = st.columns(2)
             with col_cam: camera_img = st.camera_input("Take Photo")
             with col_file: file_img = st.file_uploader("Upload Image", type=['png', 'jpg', 'jpeg'])
@@ -522,43 +524,29 @@ with col_left:
                 else:
                     with st.spinner("Analyzing Receipt..."):
                         try:
-                            # 2. Process Image
                             image = Image.open(target_img)
                             client = genai.Client(api_key=api_key)
-                            
-                            # 3. Vision Prompt
                             prompt = f"""
                             Analyze this receipt image. Identify the purchased items or the total amount.
                             The user's dashboard currency is {curr}.
-                            
                             Return a pure JSON list of objects (no markdown) with keys: 'Category' and 'Amount'.
                             - Infer a short 'Category' name (e.g. 'Food', 'Fuel', 'Groceries').
                             - 'Amount' must be a number (float).
-                            - If the receipt is in a different currency, just extract the number as is (user will verify).
-                            
-                            Example: [{{"Category": "McDonalds", "Amount": 15.50}}, {{"Category": "Tesco", "Amount": 45.00}}]
                             """
-                            
-                            # 4. Call Gemini Vision Model (Flash is good for this)
+                            # USE SELECTED MODEL
                             response = client.models.generate_content(
-                                model="gemini-1.5-flash", 
+                                model=rec_model_name, 
                                 contents=[prompt, image]
                             )
-                            
-                            # 5. Parse JSON
                             raw_txt = response.text.replace("```json", "").replace("```", "").strip()
                             new_items = json.loads(raw_txt)
                             
-                            # 6. Append to State
                             if isinstance(new_items, list):
                                 st.session_state.expenses.extend(new_items)
                                 st.success(f"Added {len(new_items)} items!")
                                 st.rerun()
-                            else:
-                                st.error("AI returned invalid format.")
-                                
-                        except Exception as e:
-                            st.error(f"Error processing receipt: {e}")
+                            else: st.error("AI returned invalid format.")
+                        except Exception as e: st.error(f"Error processing receipt: {e}")
 
         # --- EXISTING TABLE ---
         df_expenses_input = pd.DataFrame(st.session_state.expenses)
