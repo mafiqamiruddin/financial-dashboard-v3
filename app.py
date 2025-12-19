@@ -11,7 +11,7 @@ import yfinance as yf
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(
-    page_title="FinTwin: Digital Financial Twin", 
+    page_title="Smart Cashflow Apps", 
     page_icon="🧬",
     layout="wide", 
     initial_sidebar_state="expanded"
@@ -738,3 +738,4 @@ with col_right:
                         response = client.models.generate_content(model=selected_auditor_model, contents=prompt)
                         st.markdown(f"""<div class='ai-box'>{response.text}</div>""", unsafe_allow_html=True)
                 except Exception as e: st.error(f"Error: {e}")
+
