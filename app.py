@@ -20,26 +20,24 @@ st.set_page_config(
 
 # --- SIDEBAR: APPEARANCE & CONFIG ---
 with st.sidebar:
-    st.title("💸 Smart Cashflow")
-    st.caption("Financial Digital Twin")
-    st.divider()
+    st.title("⚙️ Settings")
     
-    # --- 1. APPEARANCE SETTINGS (NEW) ---
-    with st.expander("🎨 Appearance", expanded=False):
-        st.caption("Background")
-        bg_mode = st.selectbox("Theme Mode", ["Default (Clean)", "Midnight Blue", "Sunset", "Solid Color", "Custom Image"])
+    # --- 1. APPEARANCE SETTINGS ---
+    with st.expander("🎨 Appearance", expanded=True):
+        st.caption("Background Theme")
+        bg_mode = st.selectbox("Mode", ["Default (Clean)", "Midnight Blue", "Sunset", "Solid Color", "Custom Image"])
         
+        # Background Logic
         bg_css = "background-color: #f8fafc;" # Default
-        
         if bg_mode == "Midnight Blue":
             bg_css = "background: linear-gradient(to right, #0f2027, #203a43, #2c5364);"
         elif bg_mode == "Sunset":
             bg_css = "background: linear-gradient(to right, #ff9966, #ff5e62);"
         elif bg_mode == "Solid Color":
-            custom_bg_color = st.color_picker("Pick Background", "#f8fafc")
+            custom_bg_color = st.color_picker("Pick Color", "#f8fafc")
             bg_css = f"background-color: {custom_bg_color};"
         elif bg_mode == "Custom Image":
-            bg_file = st.file_uploader("Upload (PNG/JPG)", type=["png", "jpg", "jpeg"])
+            bg_file = st.file_uploader("Upload BG", type=["png", "jpg", "jpeg"])
             if bg_file:
                 try:
                     b64 = base64.b64encode(bg_file.getvalue()).decode()
@@ -47,19 +45,21 @@ with st.sidebar:
                 except: st.error("Image Error")
 
         st.caption("Typography")
-        font_name = st.selectbox("Font Type", ["Inter", "Roboto", "Poppins", "Lato", "Montserrat", "Open Sans"])
-        font_size = st.slider("Font Size (px)", 12, 24, 16)
-        text_color = st.color_picker("Main Text Color", "#0f172a")
+        font_name = st.selectbox("Font Family", ["Inter", "Roboto", "Poppins", "Lato", "Montserrat", "Open Sans"])
+        font_size = st.slider("Base Size (px)", 12, 20, 16)
+        text_color = st.color_picker("Text Color", "#0f172a")
 
-    # --- DYNAMIC CSS INJECTION ---
-    # We inject this here so it uses the variables selected above
+    # --- DYNAMIC CSS INJECTION (FIXED FONT LOADING) ---
+    # Fix: Google Fonts needs spaces replaced with '+' (e.g. Open Sans -> Open+Sans)
+    font_url_name = font_name.replace(" ", "+")
+    
     st.markdown(f"""
     <style>
         /* DYNAMIC FONT IMPORT */
-        @import url('https://fonts.googleapis.com/css2?family={font_name}:wght@400;600;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family={font_url_name}:wght@400;600;700&display=swap');
 
-        /* ROOT STYLES */
-        html, body, [class*="css"] {{
+        /* ROOT STYLES - Force Override */
+        html, body, [class*="css"], .stMarkdown, .stText {{
             font-family: '{font_name}', sans-serif !important;
             font-size: {font_size}px !important;
             color: {text_color} !important;
@@ -83,14 +83,15 @@ with st.sidebar:
             margin-bottom: 24px;
         }}
 
-        /* HEADERS - FORCE COLOR OVERRIDE */
-        h1, h2, h3, h4, .stMarkdown, .stText {{
+        /* HEADERS */
+        h1, h2, h3, h4 {{
             color: {text_color} !important;
+            font-family: '{font_name}', sans-serif !important;
         }}
 
         /* INPUTS */
         .stTextInput>div>div>input, .stNumberInput>div>div>input, .stSelectbox>div>div>div {{
-            border-radius: 8px; border: 1px solid #cbd5e1; color: #334155;
+            border-radius: 8px; border: 1px solid #cbd5e1; color: #334155; font-family: '{font_name}', sans-serif;
         }}
 
         /* BUTTONS */
@@ -98,6 +99,7 @@ with st.sidebar:
             width: 100%; border-radius: 10px; font-weight: 600; border: none; padding: 0.6rem 1rem;
             background-color: #ffffff; color: #0f172a; border: 1px solid #e2e8f0;
             transition: all 0.2s;
+            font-family: '{font_name}', sans-serif;
         }}
         .stButton>button:hover {{ background-color: #f1f5f9; }}
         
@@ -109,13 +111,14 @@ with st.sidebar:
         }}
 
         /* METRICS */
-        [data-testid="stMetricValue"] {{ font-weight: 700; color: {text_color} !important; }}
-        [data-testid="stMetricLabel"] {{ font-weight: 600; opacity: 0.7; }}
+        [data-testid="stMetricValue"] {{ font-weight: 700; color: {text_color} !important; font-family: '{font_name}', sans-serif; }}
+        [data-testid="stMetricLabel"] {{ font-weight: 600; opacity: 0.7; font-family: '{font_name}', sans-serif; }}
 
-        /* BADGES (Specific Colors Preserved) */
+        /* BADGES */
         .total-badge {{
             padding: 8px 12px; border-radius: 8px; font-weight: 600; font-size: 0.9rem;
             display: inline-block; margin-top: 10px; width: 100%; text-align: center;
+            font-family: '{font_name}', sans-serif;
         }}
         .badge-green {{ background-color: #dcfce7; color: #166534 !important; border: 1px solid #bbf7d0; }}
         .badge-red {{ background-color: #fee2e2; color: #991b1b !important; border: 1px solid #fecaca; }}
@@ -155,11 +158,9 @@ with st.sidebar:
     
     # --- 3. CURRENCY ---
     st.markdown("### 💱 Currency")
-    # Initialize session state for currency if missing
     if 'active_currency' not in st.session_state: st.session_state.active_currency = "MYR"
     
     currency_options = ["MYR", "USD", "GBP", "SGD", "EUR", "AUD", "JPY"]
-    # Safety check for index
     curr_idx = 0
     if st.session_state.active_currency in currency_options:
         curr_idx = currency_options.index(st.session_state.active_currency)
@@ -316,8 +317,8 @@ if 'data_loaded' not in st.session_state:
         st.session_state.loaded_year = int(cloud_state.get('year_input', datetime.now().year))
         st.session_state.active_currency = cloud_state.get('currency', "MYR")
     else:
-        for k, v in defaults.items(): st.session_state[k] = v # Load defaults to state
-        st.session_state.deductions_list = defaults['deductions'] # Specific list key
+        for k, v in defaults.items(): st.session_state[k] = v 
+        st.session_state.deductions_list = defaults['deductions']
         st.session_state.loaded_salary = defaults['basic_salary']
         st.session_state.loaded_allowances = defaults['allowances']
         st.session_state.loaded_var = defaults['variable_income']
@@ -331,12 +332,12 @@ if 'data_loaded' not in st.session_state:
     st.session_state.last_viewed_year = st.session_state.loaded_year
     st.session_state.data_loaded = True
 
-# Safety Checks for Hot Reloads
+# Safety Checks
 if 'last_viewed_month' not in st.session_state: st.session_state.last_viewed_month = st.session_state.get('loaded_month', "December")
 if 'last_viewed_year' not in st.session_state: st.session_state.last_viewed_year = st.session_state.get('loaded_year', datetime.now().year)
 if 'available_models' not in st.session_state: st.session_state.available_models = ["gemini-1.5-flash", "gemini-2.0-flash-exp"]
 
-# --- SIDEBAR LOGIC (Continuation of Sidebar) ---
+# --- SIDEBAR LOGIC (Continuation) ---
 with st.sidebar:
     if selected_currency != st.session_state.active_currency:
         with st.spinner(f"Converting to {selected_currency}..."):
@@ -418,8 +419,13 @@ with st.sidebar:
             except Exception as e: st.error(f"Error: {e}")
 
 # --- MAIN LAYOUT ---
-col_left, col_right = st.columns([1, 1.2], gap="large")
+# MAIN TITLE ON TOP OF PAGE
+st.title("💸 Smart Cashflow")
 curr = st.session_state.active_currency
+st.caption(f"Financial Digital Twin | Current Currency: {curr}")
+st.markdown("---")
+
+col_left, col_right = st.columns([1, 1.2], gap="large")
 
 with col_left:
     # --- PERIOD & INCOME ---
@@ -434,14 +440,13 @@ with col_left:
         selected_month = d_col1.selectbox("Month", months, index=def_idx, key="month_select")
         selected_year = d_col2.number_input("Year", min_value=2020, max_value=2030, value=st.session_state.loaded_year, key="year_input")
         
-        # WATCHER LOGIC
         if (selected_month != st.session_state.last_viewed_month) or (selected_year != st.session_state.last_viewed_year):
-            with st.spinner("Syncing records..."):
-                df_hist = get_sheet_data("History")
+            with st.spinner(f"Syncing records..."):
+                df_history = get_sheet_data("History")
                 found = None
-                if not df_hist.empty and 'Month' in df_hist.columns and 'Year' in df_hist.columns:
-                     mask = (df_hist['Month'] == selected_month) & (df_hist['Year'] == selected_year)
-                     if mask.any(): found = df_hist[mask].iloc[0]
+                if not df_history.empty and 'Month' in df_history.columns and 'Year' in df_history.columns:
+                     mask = (df_history['Month'] == selected_month) & (df_history['Year'] == selected_year)
+                     if mask.any(): found = df_history[mask].iloc[0]
                 
                 if found is not None and 'Expenses_JSON' in found:
                     st.session_state["basic_salary"] = float(found.get('Basic_Salary', 0))
@@ -452,7 +457,7 @@ with col_left:
                     st.session_state.expenses = json.loads(found.get('Expenses_JSON', '[]'))
                     st.session_state.deductions_list = json.loads(found.get('Deductions_JSON', '[]'))
                     st.session_state["active_currency"] = found.get('Currency', "MYR")
-                    st.toast(f"Loaded: {selected_month} {selected_year}", icon="✅")
+                    st.toast(f"Data Loaded: {selected_month} {selected_year}", icon="✅")
                 else:
                     defaults = get_default_state()
                     st.session_state["basic_salary"] = defaults['basic_salary']
