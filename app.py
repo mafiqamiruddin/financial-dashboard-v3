@@ -9,6 +9,7 @@ from datetime import datetime
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import yfinance as yf
+from PIL import Image # NEW IMPORT FOR IMAGE PROCESSING
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(
@@ -49,8 +50,7 @@ with st.sidebar:
         font_size = st.slider("Base Size (px)", 12, 20, 16)
         text_color = st.color_picker("Text Color", "#0f172a")
 
-    # --- DYNAMIC CSS INJECTION (FIXED FONT LOADING) ---
-    # Fix: Google Fonts needs spaces replaced with '+' (e.g. Open Sans -> Open+Sans)
+    # --- DYNAMIC CSS INJECTION ---
     font_url_name = font_name.replace(" ", "+")
     
     st.markdown(f"""
@@ -58,7 +58,7 @@ with st.sidebar:
         /* DYNAMIC FONT IMPORT */
         @import url('https://fonts.googleapis.com/css2?family={font_url_name}:wght@400;600;700&display=swap');
 
-        /* ROOT STYLES - Force Override */
+        /* ROOT STYLES */
         html, body, [class*="css"], .stMarkdown, .stText {{
             font-family: '{font_name}', sans-serif !important;
             font-size: {font_size}px !important;
@@ -505,6 +505,62 @@ with col_left:
     # --- EXPENSES ---
     with st.container():
         st.subheader(f"🧾 Expenses ({curr})")
+        
+        # --- NEW: RECEIPT SCANNER SECTION ---
+        with st.expander("📸 Scan Receipt (AI)", expanded=False):
+            st.caption("Upload a receipt or use your camera. AI will extract items.")
+            
+            # 1. Dual Input: Camera or File
+            col_cam, col_file = st.columns(2)
+            with col_cam: camera_img = st.camera_input("Take Photo")
+            with col_file: file_img = st.file_uploader("Upload Image", type=['png', 'jpg', 'jpeg'])
+            
+            target_img = camera_img if camera_img else file_img
+            
+            if target_img and st.button("Process Receipt"):
+                if not api_key: st.error("API Key required.")
+                else:
+                    with st.spinner("Analyzing Receipt..."):
+                        try:
+                            # 2. Process Image
+                            image = Image.open(target_img)
+                            client = genai.Client(api_key=api_key)
+                            
+                            # 3. Vision Prompt
+                            prompt = f"""
+                            Analyze this receipt image. Identify the purchased items or the total amount.
+                            The user's dashboard currency is {curr}.
+                            
+                            Return a pure JSON list of objects (no markdown) with keys: 'Category' and 'Amount'.
+                            - Infer a short 'Category' name (e.g. 'Food', 'Fuel', 'Groceries').
+                            - 'Amount' must be a number (float).
+                            - If the receipt is in a different currency, just extract the number as is (user will verify).
+                            
+                            Example: [{{"Category": "McDonalds", "Amount": 15.50}}, {{"Category": "Tesco", "Amount": 45.00}}]
+                            """
+                            
+                            # 4. Call Gemini Vision Model (Flash is good for this)
+                            response = client.models.generate_content(
+                                model="gemini-1.5-flash", 
+                                contents=[prompt, image]
+                            )
+                            
+                            # 5. Parse JSON
+                            raw_txt = response.text.replace("```json", "").replace("```", "").strip()
+                            new_items = json.loads(raw_txt)
+                            
+                            # 6. Append to State
+                            if isinstance(new_items, list):
+                                st.session_state.expenses.extend(new_items)
+                                st.success(f"Added {len(new_items)} items!")
+                                st.rerun()
+                            else:
+                                st.error("AI returned invalid format.")
+                                
+                        except Exception as e:
+                            st.error(f"Error processing receipt: {e}")
+
+        # --- EXISTING TABLE ---
         df_expenses_input = pd.DataFrame(st.session_state.expenses)
         edited_expenses = st.data_editor(df_expenses_input, num_rows="dynamic", use_container_width=True, key="expenses_editor", column_config={"Category": st.column_config.TextColumn("Expense Category"), "Amount": st.column_config.NumberColumn(f"Amount ({curr})", format="%.2f")})
         st.session_state.expenses = edited_expenses.to_dict('records')
