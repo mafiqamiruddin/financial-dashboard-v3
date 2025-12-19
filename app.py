@@ -133,17 +133,13 @@ def perform_currency_switch(target_currency):
 
     rate = 1.0
     
-    # 1. Normalize to MYR first (if we are currently in USD/GBP etc)
-    # We need the rate to go BACK to MYR. 
-    # Example: If current is USD, we need USD->MYR rate.
+    # 1. Normalize to MYR first
     if current_currency != "MYR":
-        # Get rate for Current -> MYR
         ticker = f"{current_currency}MYR=X"
         try:
             data = yf.Ticker(ticker).history(period="1d")
             if not data.empty:
                 to_myr_rate = data['Close'].iloc[-1]
-                # Apply normalization
                 st.session_state.basic_salary *= to_myr_rate
                 st.session_state.allowances *= to_myr_rate
                 st.session_state.variable_income *= to_myr_rate
@@ -157,14 +153,13 @@ def perform_currency_switch(target_currency):
             st.error("Currency API Error")
             return
 
-    # 2. Convert from MYR to Target (if Target is not MYR)
+    # 2. Convert from MYR to Target
     if target_currency != "MYR":
         ticker = f"MYR{target_currency}=X"
         try:
             data = yf.Ticker(ticker).history(period="1d")
             if not data.empty:
                 to_target_rate = data['Close'].iloc[-1]
-                # Apply conversion
                 st.session_state.basic_salary *= to_target_rate
                 st.session_state.allowances *= to_target_rate
                 st.session_state.variable_income *= to_target_rate
@@ -220,6 +215,25 @@ def load_cloud_state():
             if data: return data[-1]
         except: return None
     return None
+
+# --- CURRENCY HELPER ---
+@st.cache_data(ttl=3600) # Cache for 1 hour to save speed
+def get_currency_data(target_currency_code):
+    """Fetches MYR to Target Currency data."""
+    try:
+        # Yahoo Finance Ticker Format: MYRUSD=X
+        ticker_symbol = f"MYR{target_currency_code}=X"
+        ticker = yf.Ticker(ticker_symbol)
+        
+        # Get historical data for chart (1 year)
+        hist = ticker.history(period="1y")
+        
+        # Get current rate (last close)
+        current_rate = hist['Close'].iloc[-1]
+        
+        return current_rate, hist
+    except Exception as e:
+        return None, None
 
 # --- INITIALIZATION ---
 if 'data_loaded' not in st.session_state:
@@ -441,6 +455,10 @@ with col_left:
         basic_salary = c1.number_input(f"Basic Salary ({curr})", value=st.session_state.loaded_salary, key="basic_salary")
         allowances = c1.number_input(f"Allowances ({curr})", value=st.session_state.loaded_allowances, key="allowances")
         variable_income = c2.number_input(f"Side Income ({curr})", value=st.session_state.loaded_var, key="variable_income")
+        
+        # --- NEW: TOTAL GROSS INCOME ---
+        total_gross = basic_salary + allowances + variable_income
+        st.markdown(f"#### Total Gross Income: <span style='color:#2ecc71'>{curr} {total_gross:,.2f}</span>", unsafe_allow_html=True)
 
     with st.container(border=True):
         st.subheader(f"📉 Statutory Deductions ({curr})")
